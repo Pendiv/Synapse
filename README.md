@@ -18,26 +18,28 @@ The mod jar lands in `build/libs/`. Drop it into a Forge 1.20.1 client.
 
 ## Run / use with an AI
 
-1. Launch Minecraft with the mod. Synapse starts an HTTP server on
-   `http://127.0.0.1:25599` (configurable) and writes a machine-local
-   onboarding file to `<gamedir>/synapse/AGENT.md` with this host's exact URL
-   and auth state.
-2. **Load a singleplayer world once.** Commands and world state require being in
-   a world; on a menu, `/cmd` and `/state` return `NOT_IN_WORLD` (409). (Menu
-   navigation by the AI is not implemented yet.)
-3. Point your AI agent at the API. By design you barely have to explain anything
-   — tell it the base URL and to call `GET /manifest` first. A ready-to-paste
-   prompt:
+1. Launch Minecraft with the mod and **load a singleplayer world**.
+2. Type **`/synapse`** in chat.
 
-   > You can observe and control a running Minecraft client through a local HTTP
-   > API ("Synapse") at `http://127.0.0.1:25599`. It returns JSON ground truth,
-   > not pixels. First call `GET /manifest` — it lists every endpoint, parameter,
-   > the `/state` schema, error codes, and tips; treat it as the only docs you
-   > need. Loop: `GET /state?mode=summary` → act (`POST /cmd`, `POST /gui`,
-   > `POST /player`) → verify with `/state` (and `GET /gui` for screens), using
-   > `GET /wait?ticks=N` to let changes settle. Every response carries `logs`,
-   > `context`, and on failure an `error` with code/message/hint — read them and
-   > self-correct.
+That's the whole setup — and being able to run `/synapse` proves it: the mod is
+loaded, the HTTP server is up, and you're in a world (which is exactly what the
+API needs). The command prints this machine's base URL, a clickable link to the
+generated `<gamedir>/synapse/AGENT.md`, and `/synapse prompt` copies a
+ready-to-paste agent prompt to your clipboard.
+
+Then hand that prompt (or just the base URL) to your AI agent. By design you
+barely explain anything — it calls `GET /manifest` and learns the rest. The
+prompt:
+
+> You can observe and control a running Minecraft client through a local HTTP
+> API ("Synapse") at `http://127.0.0.1:25599`. It returns JSON ground truth,
+> not pixels. First call `GET /manifest` — it lists every endpoint, parameter,
+> the `/state` schema, error codes, and tips; treat it as the only docs you
+> need. Loop: `GET /state?mode=summary` → act (`POST /cmd`, `POST /gui`,
+> `POST /player`) → verify with `/state` (and `GET /gui` for screens), using
+> `GET /wait?ticks=N` to let changes settle. Every response carries `logs`,
+> `context`, and on failure an `error` with code/message/hint — read them and
+> self-correct.
 
 Any agent with a shell can drive it via `curl` (this is how the mod is tested).
 For a polished setup, wrap the endpoints as MCP tools.

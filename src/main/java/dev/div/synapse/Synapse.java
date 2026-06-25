@@ -1,6 +1,7 @@
 package dev.div.synapse;
 
 import com.mojang.logging.LogUtils;
+import dev.div.synapse.command.SynapseCommand;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.AgentDoc;
 import dev.div.synapse.core.ChatCapture;
@@ -46,6 +47,7 @@ public class Synapse {
             // Forge-bus subscribers for tick counting (/wait, timed move) and chat capture (/chat).
             MinecraftForge.EVENT_BUS.register(new TickClock());
             MinecraftForge.EVENT_BUS.register(new ChatCapture());
+            MinecraftForge.EVENT_BUS.register(new SynapseCommand()); // in-game /synapse onboarding command
             SynapseHttpServer.start();
             // Drop a machine-local onboarding file (with this host's port/auth) for AI agents.
             AgentDoc.writeQuietly();
