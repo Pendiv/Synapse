@@ -1,0 +1,62 @@
+# ---- Gradle ----
+.gradle/
+build/
+out/
+classes/
+bin/
+
+# Gradle wrapper: keep the wrapper itself tracked, ignore local launcher noise
+!gradle/wrapper/gradle-wrapper.jar
+
+# ---- ForgeGradle / MinecraftForge ----
+# Decompiled/processed Minecraft + generated run artifacts
+run/
+run-data/
+runs/
+# Generated data (uncomment to track data-gen output instead)
+# src/generated/
+
+# ---- IntelliJ IDEA ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+
+# ---- Eclipse ----
+.eclipse/
+.metadata/
+.settings/
+.classpath
+.project
+*.launch
+.apt_generated/
+.factorypath
+
+# ---- VS Code ----
+.vscode/
+
+# ---- NetBeans ----
+nbproject/
+build.xml
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Java / JVM ----
+*.class
+hs_err_pid*
+replay_pid*
+*.log
+
+# ---- Local / secrets ----
+# Never commit auth tokens or local overrides
+*.local
+local.properties
+synapse-client.toml
+
+# ---- Internal-only (not part of the buildable public source) ----
+# Design docs / planning notes live locally but are kept out of the public repo.
+refs/
