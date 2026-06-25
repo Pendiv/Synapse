@@ -3,9 +3,11 @@ package dev.div.synapse.http;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.div.synapse.Synapse;
+import dev.div.synapse.config.AuthToken;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.ContextCollector;
 import dev.div.synapse.core.LogCapture;
@@ -19,14 +21,18 @@ import dev.div.synapse.http.handlers.StateHandler;
 import dev.div.synapse.http.handlers.WaitHandler;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -41,9 +47,31 @@ public final class SynapseHttpServer {
 
     public static final String AUTH_HEADER = "X-Synapse-Token";
 
+    /** Loopback host names accepted in the Host/Origin guard (anti DNS-rebinding). */
+    private static final Set<String> LOOPBACK_HOSTS = Set.of("127.0.0.1", "localhost", "::1", "[::1]");
+
     /** Post-handler context/log collection gets a small budget so it can never
      *  itself consume a full timeout (which would starve the small pool). */
     private static final long CONTEXT_BUDGET_MS = 500L;
+
+    static {
+        // Bound slow/stalled REQUESTS (slowloris): if the request headers+body aren't fully received
+        // within maxReqTime seconds, the JDK server closes the socket and frees the pool thread.
+        // Read once when sun.net.httpserver.ServerConfig is class-loaded (first HttpServer creation
+        // in the JVM), so set before any server is created.
+        //
+        // We deliberately do NOT set maxRspTime: it bounds the handler+response phase, which would
+        // abort legitimately long-blocking endpoints (/wait, or a /cmd against a paused game up to
+        // the configured main-thread timeout). The request-side cap is what defeats the slow-body
+        // attack; a slow response READER is a minor, local-only residual.
+        setIfAbsent("sun.net.httpserver.maxReqTime", "30");
+    }
+
+    private static void setIfAbsent(String key, String value) {
+        if (System.getProperty(key) == null) {
+            System.setProperty(key, value);
+        }
+    }
 
     private static HttpServer server;
     private static ExecutorService executor;
@@ -61,6 +89,19 @@ public final class SynapseHttpServer {
 
     public static synchronized void start() {
         if (server != null) {
+            return;
+        }
+
+        AuthToken.resolve();
+
+        String bind = SynapseConfig.BIND_ADDRESS.get();
+        // Interlock: never expose an unauthenticated bridge to the network. Auth is on by default
+        // (auto-generated token), so this only trips if a user both binds off-loopback AND forces
+        // auth off — in which case running level-4 /cmd for the whole LAN is refused outright.
+        if (!isLoopback(bind) && !AuthToken.enabled()) {
+            Synapse.LOGGER.error("[Synapse] REFUSING to start: bindAddress '{}' is not loopback and no auth token "
+                    + "is set. That would expose level-4 command execution to the network. Set an authToken or "
+                    + "bind to 127.0.0.1.", bind);
             return;
         }
 
@@ -84,7 +125,6 @@ public final class SynapseHttpServer {
         }
         Map<String, SynapseEndpoint> published = Collections.unmodifiableMap(map);
 
-        String bind = SynapseConfig.BIND_ADDRESS.get();
         int port = SynapseConfig.PORT.get();
         try {
             server = HttpServer.create(new InetSocketAddress(bind, port), 0);
@@ -110,9 +150,15 @@ public final class SynapseHttpServer {
         shutdownHook = new Thread(SynapseHttpServer::stop, "synapse-http-shutdown");
         Runtime.getRuntime().addShutdownHook(shutdownHook);
 
-        if (SynapseConfig.AUTH_TOKEN.get().isEmpty()) {
-            Synapse.LOGGER.warn("[Synapse] authToken is empty — auth is DISABLED. Anyone who can reach "
+        if (AuthToken.source() == AuthToken.Source.GENERATED || AuthToken.source() == AuthToken.Source.FILE) {
+            Synapse.LOGGER.info("[Synapse] Auth ENABLED with an auto-generated token. The agent reads it from {} "
+                    + "(also shown by /synapse and in AGENT.md). The token value is never logged.",
+                    AuthToken.tokenFile().toAbsolutePath());
+        } else if (!AuthToken.enabled()) {
+            Synapse.LOGGER.warn("[Synapse] authToken is set empty — auth is DISABLED. Anyone who can reach "
                     + "{}:{} can run arbitrary commands. Keep bindAddress on 127.0.0.1.", bind, port);
+        } else {
+            Synapse.LOGGER.info("[Synapse] Auth ENABLED (token from config).");
         }
         Synapse.LOGGER.info("[Synapse] HTTP bridge listening on http://{}:{} ({} endpoints). Try GET /manifest.",
                 bind, port, published.size());
@@ -155,6 +201,7 @@ public final class SynapseHttpServer {
                 handleUnknown(exchange);
                 return;
             }
+            requireLocalRequest(exchange);
             requireAuth(exchange);
             requireMethod(exchange, endpoint.methods());
 
@@ -199,7 +246,9 @@ public final class SynapseHttpServer {
         JsonObject error;
         SynapseError errorCode;
         try {
-            // Auth still applies so an unauthenticated probe cannot enumerate freely.
+            // The local-origin guard and auth still apply so a browser/unauthenticated probe
+            // cannot enumerate freely.
+            requireLocalRequest(exchange);
             requireAuth(exchange);
             List<String> known = new ArrayList<>(endpoints.keySet());
             Collections.sort(known);
@@ -225,30 +274,139 @@ public final class SynapseHttpServer {
         }
     }
 
-    /** Logs are withheld from unauthenticated responses (no info leak). */
+    /** Logs are withheld from rejected (unauthenticated / blocked-origin) responses (no info leak). */
     private static JsonArray logsFor(SynapseError errorCode) {
-        return errorCode == SynapseError.UNAUTHORIZED ? new JsonArray() : LogCapture.recentAsJson();
+        return withheld(errorCode) ? new JsonArray() : LogCapture.recentAsJson();
     }
 
     /**
-     * Context for the envelope. Unauthenticated responses get an empty object —
-     * this both avoids leaking game state and avoids scheduling main-thread work
-     * for an unauthenticated caller. Otherwise collected with a small budget.
+     * Context for the envelope. Rejected responses (unauthorized / forbidden) get an empty
+     * object — this both avoids leaking game state and avoids scheduling main-thread work for
+     * a caller we already turned away. Otherwise collected with a small budget.
      */
     private static JsonObject contextFor(SynapseError errorCode) {
-        if (errorCode == SynapseError.UNAUTHORIZED) {
+        if (withheld(errorCode)) {
             return new JsonObject();
         }
         long budget = Math.min(SynapseConfig.TIMEOUT_MS.get(), CONTEXT_BUDGET_MS);
         return ContextCollector.collectSafe(budget);
     }
 
+    private static boolean withheld(SynapseError errorCode) {
+        return errorCode == SynapseError.UNAUTHORIZED || errorCode == SynapseError.FORBIDDEN;
+    }
+
     // === guards ===
 
+    /**
+     * Rejects requests that look like they came from a web browser pointed at the loopback
+     * bridge (CSRF / DNS-rebinding). Only enforced on a loopback bind — a deliberate LAN bind
+     * is an opt-in protected by the auth token, and the rebinding threat is loopback-specific.
+     *
+     * <ul>
+     *   <li><b>Host</b> must name a loopback host on our port — defeats DNS rebinding, where the
+     *       browser carries the attacker's hostname in Host.</li>
+     *   <li><b>Sec-Fetch-Site</b> of {@code cross-site}/{@code same-site} is rejected — catches
+     *       browser-originated requests even when Origin is absent.</li>
+     *   <li><b>Origin</b>, if present, must be a localhost origin — non-browser agents send none.</li>
+     * </ul>
+     */
+    private static void requireLocalRequest(HttpExchange exchange) throws SynapseException {
+        if (!isLoopback(SynapseConfig.BIND_ADDRESS.get())) {
+            return;
+        }
+        Headers h = exchange.getRequestHeaders();
+        int port = SynapseConfig.PORT.get();
+
+        String host = h.getFirst("Host");
+        if (!hostAllowed(host, port)) {
+            throw new SynapseException(SynapseError.FORBIDDEN,
+                    "Host header '" + host + "' is not an allowed loopback host (blocks DNS-rebinding).")
+                    .detail("hint", "Reach Synapse via http://127.0.0.1:" + port + " or http://localhost:" + port + ".");
+        }
+
+        String secSite = h.getFirst("Sec-Fetch-Site");
+        if (secSite != null) {
+            String s = secSite.trim().toLowerCase(Locale.ROOT);
+            if (s.equals("cross-site") || s.equals("same-site")) {
+                throw new SynapseException(SynapseError.FORBIDDEN,
+                        "Cross-origin browser request blocked (Sec-Fetch-Site: " + s + ").")
+                        .detail("hint", "Synapse is a local API for non-browser agents; web pages cannot drive it.");
+            }
+        }
+
+        String origin = h.getFirst("Origin");
+        if (origin != null && !origin.isEmpty() && !originAllowed(origin, port)) {
+            throw new SynapseException(SynapseError.FORBIDDEN,
+                    "Origin '" + origin + "' is not allowed.")
+                    .detail("hint", "Only a non-browser local agent (no Origin) or a localhost origin is accepted.");
+        }
+    }
+
+    private static boolean isLoopback(String bind) {
+        try {
+            return InetAddress.getByName(bind).isLoopbackAddress();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** True if {@code host} (a Host/authority value) names a loopback host on the expected port. */
+    private static boolean hostAllowed(String host, int port) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        String h = host.trim();
+        String name;
+        String portStr;
+        if (h.startsWith("[")) { // IPv6 literal, e.g. [::1]:25599
+            int close = h.indexOf(']');
+            if (close < 0) {
+                return false;
+            }
+            name = h.substring(0, close + 1);
+            String rest = h.substring(close + 1);
+            portStr = rest.startsWith(":") ? rest.substring(1) : "";
+        } else {
+            int colon = h.lastIndexOf(':');
+            if (colon >= 0) {
+                name = h.substring(0, colon);
+                portStr = h.substring(colon + 1);
+            } else {
+                name = h;
+                portStr = "";
+            }
+        }
+        if (portStr.isEmpty()) {
+            return false; // our port is non-default, so a valid Host always carries it
+        }
+        try {
+            if (Integer.parseInt(portStr) != port) {
+                return false;
+            }
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        return LOOPBACK_HOSTS.contains(name.toLowerCase(Locale.ROOT));
+    }
+
+    /** True if {@code origin} is an http(s) localhost origin on the expected port. */
+    private static boolean originAllowed(String origin, int port) {
+        int sep = origin.indexOf("://");
+        if (sep < 0) {
+            return false;
+        }
+        String scheme = origin.substring(0, sep).toLowerCase(Locale.ROOT);
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            return false;
+        }
+        return hostAllowed(origin.substring(sep + 3), port);
+    }
+
     private static void requireAuth(HttpExchange exchange) throws SynapseException {
-        String token = SynapseConfig.AUTH_TOKEN.get();
-        if (token == null || token.isEmpty()) {
-            return; // auth disabled
+        String token = AuthToken.effectiveToken();
+        if (token.isEmpty()) {
+            return; // auth disabled (only if explicitly forced off on a loopback bind)
         }
         String provided = exchange.getRequestHeaders().getFirst(AUTH_HEADER);
         if (provided == null || !constantTimeEquals(provided, token)) {
@@ -270,8 +428,20 @@ public final class SynapseHttpServer {
                 .detail("expectedMethods", String.join(",", methods));
     }
 
+    /**
+     * Constant-time, length-independent comparison: both inputs are SHA-256'd first so the
+     * compare runs over equal-length digests and cannot leak the secret's length via timing.
+     */
     private static boolean constantTimeEquals(String a, String b) {
-        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+        return MessageDigest.isEqual(sha256(a), sha256(b));
+    }
+
+    private static byte[] sha256(String s) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e); // guaranteed present on every JVM
+        }
     }
 
     private static ThreadFactory daemonFactory() {

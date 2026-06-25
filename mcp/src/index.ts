@@ -5,14 +5,30 @@
  *
  * Config via env:
  *   SYNAPSE_URL   base URL of the bridge (default http://127.0.0.1:25599)
- *   SYNAPSE_TOKEN auth token, sent as X-Synapse-Token (default none)
+ *   SYNAPSE_TOKEN auth token, sent as X-Synapse-Token. If unset, the token is
+ *                 auto-discovered from ~/.synapse/token (where the mod writes the
+ *                 auto-generated token), so the local setup needs zero manual steps.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 const BASE = (process.env.SYNAPSE_URL ?? "http://127.0.0.1:25599").replace(/\/+$/, "");
-const TOKEN = process.env.SYNAPSE_TOKEN ?? "";
+
+/** Token from env, else the machine-local file the mod writes (~/.synapse/token). */
+function resolveToken(): string {
+  const fromEnv = process.env.SYNAPSE_TOKEN;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  try {
+    return readFileSync(join(homedir(), ".synapse", "token"), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+const TOKEN = resolveToken();
 
 type Json = any;
 

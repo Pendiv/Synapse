@@ -3,6 +3,7 @@ package dev.div.synapse.http;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
+import dev.div.synapse.config.SynapseConfig;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,18 +11,40 @@ import java.io.OutputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /** Small JDK-HttpServer helpers: body reading, query parsing, response writing. */
 public final class HttpUtil {
 
+    private static final int MAX_BODY_FALLBACK = 1 << 20;
+
     private HttpUtil() {
     }
 
-    /** Reads the full request body as UTF-8. Returns "" if there is none. */
-    public static String readBody(HttpExchange exchange) throws IOException {
+    /**
+     * Reads the request body as UTF-8, capped at {@code maxBodyBytes}. Returns "" if there is none.
+     * The bounded read defeats both a lying/absent Content-Length and an unbounded chunked stream,
+     * so a single request can no longer exhaust the client heap.
+     */
+    public static String readBody(HttpExchange exchange) throws IOException, SynapseException {
+        int cap = maxBody();
         try (InputStream in = exchange.getRequestBody()) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            byte[] bytes = in.readNBytes(cap + 1);
+            if (bytes.length > cap) {
+                throw new SynapseException(SynapseError.BAD_REQUEST,
+                        "Request body exceeds the " + cap + "-byte limit.")
+                        .detail("hint", "Commands and JSON payloads are tiny; raise server.maxBodyBytes if you truly need more.");
+            }
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+    }
+
+    private static int maxBody() {
+        try {
+            return Math.max(1024, SynapseConfig.MAX_BODY_BYTES.get());
+        } catch (Throwable t) {
+            return MAX_BODY_FALLBACK;
         }
     }
 
@@ -47,8 +70,21 @@ public final class HttpUtil {
         return URLDecoder.decode(s, StandardCharsets.UTF_8);
     }
 
-    /** Parses the request body as a JSON object. Returns an empty object if the body is blank. */
+    /**
+     * Parses the request body as a JSON object. Returns an empty object if the body is blank.
+     *
+     * <p>Requires {@code Content-Type: application/json}. application/json is NOT a CORS
+     * "simple" content type, so a cross-origin browser must send a preflight — which Synapse
+     * never answers with CORS headers — making these mutating endpoints unreachable from a
+     * drive-by web page even before the local-origin guard.
+     */
     public static JsonObject parseJsonBody(HttpExchange exchange) throws IOException, SynapseException {
+        String ct = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (ct == null || !ct.trim().toLowerCase(Locale.ROOT).startsWith("application/json")) {
+            throw new SynapseException(SynapseError.BAD_REQUEST,
+                    "This endpoint requires Content-Type: application/json.")
+                    .detail("hint", "Send the body as JSON with header 'Content-Type: application/json'.");
+        }
         String body = readBody(exchange);
         if (body == null || body.isBlank()) {
             return new JsonObject();

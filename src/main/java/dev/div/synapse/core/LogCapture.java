@@ -13,14 +13,24 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * Captures recent log lines into a bounded ring buffer so every response can
- * carry the {@code logs} field (spec §8). A Log4j2 appender is attached to the
- * root logger; the buffer is trimmed to {@code config.logBufferSize}.
+ * carry the {@code logs} field (spec §8). The buffer is trimmed to
+ * {@code config.logBufferSize}.
+ *
+ * <p>By default the appender is attached to the {@code dev.div.synapse} package
+ * logger, so {@code logs} carries only Synapse's own lines — not the whole game's
+ * root log (which would leak other mods' diagnostics, file paths, and server
+ * addresses to any client that can read a response). Set
+ * {@code captureAllModLogs=true} to attach to the root logger instead.
  */
 public final class LogCapture {
+
+    /** The package logger we scope to by default; the mod's own logger lives under it. */
+    private static final String SCOPE = "dev.div.synapse";
 
     private static final ConcurrentLinkedDeque<String> BUFFER = new ConcurrentLinkedDeque<>();
     private static volatile boolean installed = false;
     private static RingAppender appender;
+    private static boolean attachedToRoot = false;
 
     private LogCapture() {
     }
@@ -32,8 +42,10 @@ public final class LogCapture {
         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
         appender = new RingAppender();
         appender.start();
-        Logger root = ctx.getRootLogger();
-        root.addAppender(appender);
+        attachedToRoot = captureAll();
+        target(ctx).addAppender(appender);
+        // Re-resolve cached loggers so an inserted package LoggerConfig actually receives events.
+        ctx.updateLoggers();
         installed = true;
     }
 
@@ -42,10 +54,23 @@ public final class LogCapture {
             return;
         }
         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
-        ctx.getRootLogger().removeAppender(appender);
+        target(ctx).removeAppender(appender);
+        ctx.updateLoggers();
         appender.stop();
         appender = null;
         installed = false;
+    }
+
+    private static Logger target(LoggerContext ctx) {
+        return attachedToRoot ? ctx.getRootLogger() : ctx.getLogger(SCOPE);
+    }
+
+    private static boolean captureAll() {
+        try {
+            return SynapseConfig.CAPTURE_ALL_MOD_LOGS.get();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** Snapshot of recent log lines (oldest → newest) as a JSON array. */

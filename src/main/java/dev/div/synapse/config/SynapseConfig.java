@@ -18,9 +18,11 @@ public final class SynapseConfig {
     public static final ForgeConfigSpec.ConfigValue<String> BIND_ADDRESS;
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
     public static final ForgeConfigSpec.IntValue TIMEOUT_MS;
+    public static final ForgeConfigSpec.IntValue MAX_BODY_BYTES;
     // [state]
     public static final ForgeConfigSpec.DoubleValue STATE_RADIUS;
     public static final ForgeConfigSpec.IntValue LOG_BUFFER_SIZE;
+    public static final ForgeConfigSpec.BooleanValue CAPTURE_ALL_MOD_LOGS;
     // [features]
     public static final ForgeConfigSpec.BooleanValue SCREENSHOT_ENABLED;
 
@@ -33,10 +35,15 @@ public final class SynapseConfig {
         BIND_ADDRESS = b.comment("Bind address. Strongly recommend 127.0.0.1 (localhost only).")
                 .define("bindAddress", "127.0.0.1");
         AUTH_TOKEN = b.comment("Auth token checked against the X-Synapse-Token header.",
-                        "Empty string disables auth (a warning is logged at startup).")
+                        "Leave EMPTY for secure-by-default: Synapse auto-generates a strong random token on",
+                        "first run and saves it to ~/.synapse/token (the bundled MCP server reads it from there,",
+                        "and /synapse + AGENT.md print it). Set an explicit value to manage your own secret.")
                 .define("authToken", "");
         TIMEOUT_MS = b.comment("Timeout (ms) for work scheduled onto the Minecraft main thread.")
                 .defineInRange("timeoutMs", 5000, 100, 120_000);
+        MAX_BODY_BYTES = b.comment("Maximum accepted request body size in bytes (guards against memory-exhaustion).",
+                        "Commands and JSON payloads are tiny; the default 1 MiB is generous.")
+                .defineInRange("maxBodyBytes", 1_048_576, 1_024, 67_108_864);
         b.pop();
 
         b.push("state");
@@ -44,6 +51,11 @@ public final class SynapseConfig {
                 .defineInRange("stateRadius", 16.0, 1.0, 256.0);
         LOG_BUFFER_SIZE = b.comment("Number of recent log lines included in every response's 'logs'.")
                 .defineInRange("logBufferSize", 30, 0, 1000);
+        CAPTURE_ALL_MOD_LOGS = b.comment("If false (default), 'logs' carries only Synapse's own log lines.",
+                        "If true, it captures the whole game's root log (other mods, MC internals) — richer",
+                        "for AI self-correction, but may expose file paths, server addresses, and other mods'",
+                        "diagnostics to any client that can read a response.")
+                .define("captureAllModLogs", false);
         b.pop();
 
         b.push("features");

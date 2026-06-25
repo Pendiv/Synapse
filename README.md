@@ -64,22 +64,53 @@ can drive it.
 Every response uses one envelope: `{ ok, endpoint, data, error, logs, context, ts }`.
 
 ```
-curl -s 127.0.0.1:25599/manifest | jq
-curl -s "127.0.0.1:25599/state?mode=summary" | jq .data
-curl -s -X POST 127.0.0.1:25599/cmd    -d "give @s minecraft:diamond 64" | jq .data
-curl -s -X POST 127.0.0.1:25599/gui    -d '{"action":"open","target":"inventory"}'
-curl -s -X POST 127.0.0.1:25599/player -d '{"action":"move","forward":true,"ticks":20}'
+# Auth is on by default — the token is auto-generated and stored machine-local:
+TOKEN=$(cat ~/.synapse/token)
+H="X-Synapse-Token: $TOKEN"
+
+curl -s -H "$H" 127.0.0.1:25599/manifest | jq
+curl -s -H "$H" "127.0.0.1:25599/state?mode=summary" | jq .data
+curl -s -H "$H" -X POST 127.0.0.1:25599/cmd -d "give @s minecraft:diamond 64" | jq .data
+curl -s -H "$H" -H "Content-Type: application/json" -X POST 127.0.0.1:25599/gui    -d '{"action":"open","target":"inventory"}'
+curl -s -H "$H" -H "Content-Type: application/json" -X POST 127.0.0.1:25599/player -d '{"action":"move","forward":true,"ticks":20}'
 ```
+
+(The bundled MCP server and the `/synapse` command surface the same token, so a
+local AI agent needs no manual setup.)
 
 ## Configuration & security
 
 `synapse-client.toml` (in the config dir): `port`, `bindAddress`, `authToken`,
-`timeoutMs`, `stateRadius`, `logBufferSize`, `screenshotEnabled`.
+`timeoutMs`, `maxBodyBytes`, `stateRadius`, `logBufferSize`, `captureAllModLogs`,
+`screenshotEnabled`.
 
-- Binds to `127.0.0.1` by default. Anyone who can reach the port can run
-  arbitrary commands, so keep it on loopback.
-- Set `authToken` to require an `X-Synapse-Token` header on every request.
-  Empty token = auth disabled (a warning is logged at startup).
+The bridge runs *inside your game client*, and `/cmd` executes Minecraft
+commands at permission level 4. Treat the port as a control surface and keep it
+local. Synapse hardens this in depth:
+
+- **Loopback bind.** Binds to `127.0.0.1` by default. If you change `bindAddress`
+  to a non-loopback address *and* have no auth token, Synapse **refuses to
+  start** (it would expose level-4 command execution to the network).
+- **Auth on by default.** Leave `authToken` empty and Synapse auto-generates a
+  strong random token on first run, stored machine-local at `~/.synapse/token`.
+  Every request must carry it as `X-Synapse-Token`. The bundled MCP server
+  auto-reads that file, and `/synapse` / `AGENT.md` print it, so your local
+  agent still works with zero manual steps — but a web page or other process
+  that can't read the file is rejected. Set an explicit `authToken` to manage
+  your own secret (e.g. for a deliberate LAN setup, where you pass it to the
+  client via `SYNAPSE_TOKEN`).
+- **Browser / CSRF / DNS-rebinding guard.** On a loopback bind, requests are
+  rejected unless the `Host` header is a localhost name on the right port
+  (defeats DNS rebinding), no cross-site `Sec-Fetch-Site` is present, and any
+  `Origin` is a localhost origin. Mutating JSON endpoints also require
+  `Content-Type: application/json` (not a CORS "simple" type). Net effect: a
+  malicious web page you have open **cannot** drive the bridge.
+- **Resource limits.** Request bodies are capped (`maxBodyBytes`, default 1 MiB)
+  and slow/stalled connections are timed out, so a single request can't exhaust
+  the client's memory or pin its threads.
+- **Minimal disclosure.** By default `logs` carries only Synapse's own log lines
+  (set `captureAllModLogs=true` for the whole game's log); rejected requests get
+  no `logs`/`context`; the token is never logged.
 
 ## License
 

@@ -38,6 +38,12 @@ public final class SynapseCommand {
                         .withStyle(ChatFormatting.GRAY)));
         src.sendSystemMessage(Component.literal("Agent instructions: ").withStyle(ChatFormatting.GRAY)
                 .append(fileLink(AgentDoc.docPathString())));
+        if (AgentDoc.authEnabled()) {
+            src.sendSystemMessage(Component.literal("Auth token: ").withStyle(ChatFormatting.GRAY)
+                    .append(copyLink("[copy token]", AgentDoc.authToken()))
+                    .append(Component.literal(" — send it as header X-Synapse-Token (the bundled MCP server finds it automatically).")
+                            .withStyle(ChatFormatting.DARK_GRAY)));
+        }
         src.sendSystemMessage(Component.literal("Point your AI at the URL and have it call ")
                 .withStyle(ChatFormatting.GRAY)
                 .append(Component.literal("GET /manifest").withStyle(ChatFormatting.WHITE))
@@ -90,5 +96,13 @@ public final class SynapseCommand {
         return Component.literal(text).withStyle(style -> style
                 .withColor(ChatFormatting.AQUA)
                 .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command)));
+    }
+
+    private static MutableComponent copyLink(String text, String value) {
+        return Component.literal(text).withStyle(style -> style
+                .withColor(ChatFormatting.GREEN)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, value))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("Copy the auth token to your clipboard"))));
     }
 }

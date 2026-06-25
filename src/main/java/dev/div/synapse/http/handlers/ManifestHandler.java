@@ -4,7 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
 import dev.div.synapse.Synapse;
-import dev.div.synapse.config.SynapseConfig;
+import dev.div.synapse.config.AuthToken;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.SynapseEndpoint;
 import dev.div.synapse.http.SynapseError;
@@ -49,7 +49,7 @@ public final class ManifestHandler implements SynapseEndpoint {
                 + "ground truth) over /screenshot for logic.");
 
         JsonObject auth = new JsonObject();
-        auth.addProperty("required", !SynapseConfig.AUTH_TOKEN.get().isEmpty());
+        auth.addProperty("required", AuthToken.enabled());
         auth.addProperty("header", SynapseHttpServer.AUTH_HEADER);
         data.add("auth", auth);
 

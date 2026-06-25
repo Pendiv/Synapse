@@ -62,7 +62,7 @@ Other MCP clients take the same `command`/`args`.
 | Var | Default | Meaning |
 |---|---|---|
 | `SYNAPSE_URL` | `http://127.0.0.1:25599` | Bridge base URL |
-| `SYNAPSE_TOKEN` | *(none)* | Sent as `X-Synapse-Token` if set |
+| `SYNAPSE_TOKEN` | auto-discovered | Sent as `X-Synapse-Token`. If unset, read from `~/.synapse/token` (where the mod writes its auto-generated token), so the local setup needs no manual token step. Set it explicitly to override (e.g. a custom or remote token). |
 
 ## Prerequisites
 

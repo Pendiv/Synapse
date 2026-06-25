@@ -1,6 +1,7 @@
 package dev.div.synapse.core;
 
 import dev.div.synapse.Synapse;
+import dev.div.synapse.config.AuthToken;
 import dev.div.synapse.config.SynapseConfig;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -45,7 +46,12 @@ public final class AgentDoc {
     }
 
     public static boolean authEnabled() {
-        return !SynapseConfig.AUTH_TOKEN.get().isEmpty();
+        return AuthToken.enabled();
+    }
+
+    /** The effective auth token for this machine (may be auto-generated). Empty if auth is off. */
+    public static String authToken() {
+        return AuthToken.effectiveToken();
     }
 
     public static Path docFile() {
@@ -56,13 +62,18 @@ public final class AgentDoc {
         return docFile().toAbsolutePath().toString();
     }
 
-    /** The paste-ready agent prompt, with this machine's base URL substituted. */
+    /** The paste-ready agent prompt, with this machine's base URL and token substituted. */
     public static String agentPrompt() {
         return PROMPT
                 .replace("__BASE__", baseUrl())
                 .replace("__AUTHHINT__", authEnabled()
-                        ? "Send your token as header X-Synapse-Token."
+                        ? "Authenticate EVERY request with header  X-Synapse-Token: " + authToken()
                         : "No auth token is set.");
+    }
+
+    /** Shell snippet to attach the auth header in the curl examples (empty when auth is off). */
+    private static String curlAuth() {
+        return authEnabled() ? "-H \"X-Synapse-Token: $TOKEN\" " : "";
     }
 
     /** Best-effort: writes <gamedir>/synapse/AGENT.md, logging (not throwing) on failure. */
@@ -74,7 +85,9 @@ public final class AgentDoc {
                     + "machine's settings.\n\n"
                     + "- Base URL: `" + baseUrl() + "`\n"
                     + "- Auth: " + (authEnabled()
-                            ? "required — send header `X-Synapse-Token: <token>`"
+                            ? "required — send header `X-Synapse-Token: " + authToken() + "`\n"
+                              + "  (this machine-local token is auto-generated; it is also stored in `"
+                              + AuthToken.tokenFile().toAbsolutePath() + "`)"
                             : "disabled (token empty; localhost only)") + "\n"
                     + "- Minecraft 1.20.1 (Forge), client-side only.\n\n"
                     + "## One-time setup (human)\n\n"
@@ -86,9 +99,10 @@ public final class AgentDoc {
                     + "----------------------------------------------------------------------\n\n"
                     + "## First moves (shell)\n\n"
                     + "```\n"
-                    + "curl -s " + baseUrl() + "/manifest | jq\n"
-                    + "curl -s \"" + baseUrl() + "/state?mode=summary\" | jq .data\n"
-                    + "curl -s -X POST " + baseUrl() + "/cmd -d \"give @s minecraft:diamond 64\" | jq .data\n"
+                    + (authEnabled() ? "TOKEN=" + authToken() + "\n" : "")
+                    + "curl -s " + curlAuth() + baseUrl() + "/manifest | jq\n"
+                    + "curl -s " + curlAuth() + "\"" + baseUrl() + "/state?mode=summary\" | jq .data\n"
+                    + "curl -s -X POST " + curlAuth() + baseUrl() + "/cmd -d \"give @s minecraft:diamond 64\" | jq .data\n"
                     + "```\n";
             Files.createDirectories(docFile().getParent());
             Files.writeString(docFile(), md, StandardCharsets.UTF_8);
