@@ -42,7 +42,11 @@ prompt:
 > self-correct.
 
 Any agent with a shell can drive it via `curl` (this is how the mod is tested).
-For a polished setup, wrap the endpoints as MCP tools.
+For a first-class setup, this repo ships an **MCP server** that exposes the
+endpoints as tools (`synapse_state`, `synapse_cmd`, …) for Claude Code/Desktop,
+Codex, and other MCP clients — see [`mcp/README.md`](mcp/README.md). Synapse is
+AI-agnostic: anything that can make HTTP calls (a shell, an HTTP tool, or MCP)
+can drive it.
 
 ## Endpoints
 

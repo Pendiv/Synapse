@@ -8,6 +8,17 @@ drive the game without speaking raw HTTP.
 AI client ⇄ synapse-mcp (this) ⇄ HTTP ⇄ Synapse mod ⇄ Minecraft
 ```
 
+## Quick start (end to end)
+
+1. **Build once:** `cd mcp && npm install && npm run build`
+2. **Launch Minecraft** with the Synapse mod and **enter a world** (type
+   `/synapse` in chat to confirm it's listening).
+3. **Register the server** with your AI client (see below). From this repo the
+   committed `.mcp.json` already offers it to `claude` — approve it on first use.
+4. **Just talk to the AI.** It now has `synapse_*` tools — e.g. "give me 64
+   diamonds", "open my inventory", "walk forward and tell me what you see" —
+   and calls them directly (no curl, no JSON).
+
 ## Tools
 
 `synapse_manifest`, `synapse_state`, `synapse_cmd`, `synapse_gui`,
