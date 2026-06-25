@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "synapse": {
+      "command": "node",
+      "args": ["mcp/build/index.js"],
+      "env": {}
+    }
+  }
+}

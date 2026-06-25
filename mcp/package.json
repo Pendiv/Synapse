@@ -1,0 +1,24 @@
+{
+  "name": "synapse-mcp",
+  "version": "1.0.0",
+  "description": "MCP server exposing the Synapse Minecraft bridge as tools for AI agents.",
+  "type": "module",
+  "bin": {
+    "synapse-mcp": "build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0"
+  }
+}

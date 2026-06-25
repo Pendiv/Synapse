@@ -67,3 +67,8 @@ refs/
 # minimum dependency set (the apply-from in build.gradle is a no-op).
 libs/
 dev-mods.gradle
+
+# ---- MCP companion (Node) ----
+# build/ above already covers mcp/build/. Ignore deps + the local smoke test.
+node_modules/
+mcp/test-client.mjs
