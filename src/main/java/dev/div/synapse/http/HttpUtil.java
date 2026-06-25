@@ -1,5 +1,7 @@
 package dev.div.synapse.http;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
@@ -43,6 +45,60 @@ public final class HttpUtil {
 
     private static String decode(String s) {
         return URLDecoder.decode(s, StandardCharsets.UTF_8);
+    }
+
+    /** Parses the request body as a JSON object. Returns an empty object if the body is blank. */
+    public static JsonObject parseJsonBody(HttpExchange exchange) throws IOException, SynapseException {
+        String body = readBody(exchange);
+        if (body == null || body.isBlank()) {
+            return new JsonObject();
+        }
+        try {
+            JsonElement el = ResponseEnvelope.GSON.fromJson(body, JsonElement.class);
+            if (el == null || !el.isJsonObject()) {
+                throw new SynapseException(SynapseError.BAD_REQUEST, "Request body must be a JSON object.");
+            }
+            return el.getAsJsonObject();
+        } catch (com.google.gson.JsonSyntaxException e) {
+            throw new SynapseException(SynapseError.BAD_REQUEST, "Malformed JSON body: " + e.getMessage());
+        }
+    }
+
+    public static String str(JsonObject o, String key, String def) {
+        return o.has(key) && o.get(key).isJsonPrimitive() ? o.get(key).getAsString() : def;
+    }
+
+    public static int intval(JsonObject o, String key, int def) throws SynapseException {
+        if (!o.has(key) || o.get(key).isJsonNull()) {
+            return def;
+        }
+        JsonElement e = o.get(key);
+        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber()) {
+            throw new SynapseException(SynapseError.BAD_REQUEST, "Field '" + key + "' must be a number.");
+        }
+        return e.getAsInt();
+    }
+
+    public static double dbl(JsonObject o, String key, double def) throws SynapseException {
+        if (!o.has(key) || o.get(key).isJsonNull()) {
+            return def;
+        }
+        JsonElement e = o.get(key);
+        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber()) {
+            throw new SynapseException(SynapseError.BAD_REQUEST, "Field '" + key + "' must be a number.");
+        }
+        return e.getAsDouble();
+    }
+
+    public static boolean bool(JsonObject o, String key, boolean def) throws SynapseException {
+        if (!o.has(key) || o.get(key).isJsonNull()) {
+            return def;
+        }
+        JsonElement e = o.get(key);
+        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isBoolean()) {
+            throw new SynapseException(SynapseError.BAD_REQUEST, "Field '" + key + "' must be a boolean.");
+        }
+        return e.getAsBoolean();
     }
 
     /** Writes a JSON response with the given status and closes the exchange. */

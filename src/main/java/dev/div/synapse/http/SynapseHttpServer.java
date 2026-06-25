@@ -9,10 +9,14 @@ import dev.div.synapse.Synapse;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.ContextCollector;
 import dev.div.synapse.core.LogCapture;
+import dev.div.synapse.http.handlers.ChatHandler;
 import dev.div.synapse.http.handlers.CommandHandler;
+import dev.div.synapse.http.handlers.GuiHandler;
 import dev.div.synapse.http.handlers.ManifestHandler;
+import dev.div.synapse.http.handlers.PlayerHandler;
 import dev.div.synapse.http.handlers.ScreenshotHandler;
 import dev.div.synapse.http.handlers.StateHandler;
+import dev.div.synapse.http.handlers.WaitHandler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -64,6 +68,10 @@ public final class SynapseHttpServer {
         List<SynapseEndpoint> functional = new ArrayList<>();
         functional.add(new StateHandler());
         functional.add(new CommandHandler());
+        functional.add(new GuiHandler());
+        functional.add(new PlayerHandler());
+        functional.add(new WaitHandler());
+        functional.add(new ChatHandler());
         if (SynapseConfig.SCREENSHOT_ENABLED.get()) {
             functional.add(new ScreenshotHandler());
         }
@@ -93,7 +101,9 @@ public final class SynapseHttpServer {
         // Catch-all for unknown paths (longest-prefix match means specific paths win).
         server.createContext("/", SynapseHttpServer::handleUnknown);
 
-        executor = Executors.newFixedThreadPool(2, daemonFactory());
+        // A few threads so blocking endpoints (/wait, /player move) can't starve
+        // the observation endpoints for a sequential-but-occasionally-overlapping AI.
+        executor = Executors.newFixedThreadPool(6, daemonFactory());
         server.setExecutor(executor);
         server.start();
 
@@ -146,7 +156,7 @@ public final class SynapseHttpServer {
                 return;
             }
             requireAuth(exchange);
-            requireMethod(exchange, endpoint.httpMethod());
+            requireMethod(exchange, endpoint.methods());
 
             EndpointResult result = endpoint.handle(exchange);
             if (result.isRaw()) {
@@ -248,13 +258,16 @@ public final class SynapseHttpServer {
         }
     }
 
-    private static void requireMethod(HttpExchange exchange, String method) throws SynapseException {
-        if (!exchange.getRequestMethod().equalsIgnoreCase(method)) {
-            throw new SynapseException(SynapseError.BAD_REQUEST,
-                    "This endpoint requires HTTP " + method + " but got "
-                            + exchange.getRequestMethod() + ".")
-                    .detail("expectedMethod", method);
+    private static void requireMethod(HttpExchange exchange, String[] methods) throws SynapseException {
+        String actual = exchange.getRequestMethod();
+        for (String allowed : methods) {
+            if (allowed.equalsIgnoreCase(actual)) {
+                return;
+            }
         }
+        throw new SynapseException(SynapseError.BAD_REQUEST,
+                "This endpoint requires HTTP " + String.join("/", methods) + " but got " + actual + ".")
+                .detail("expectedMethods", String.join(",", methods));
     }
 
     private static boolean constantTimeEquals(String a, String b) {

@@ -22,8 +22,8 @@ public final class CommandHandler implements SynapseEndpoint {
     }
 
     @Override
-    public String httpMethod() {
-        return "POST";
+    public String[] methods() {
+        return new String[]{"POST"};
     }
 
     @Override

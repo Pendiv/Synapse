@@ -14,8 +14,8 @@ public interface SynapseEndpoint {
     /** Request path, e.g. {@code "/state"}. */
     String path();
 
-    /** Accepted HTTP method, {@code "GET"} or {@code "POST"}. */
-    String httpMethod();
+    /** Accepted HTTP methods, e.g. {@code {"GET"}} or {@code {"GET","POST"}}. */
+    String[] methods();
 
     /**
      * Produces the endpoint's result (JSON payload or raw binary).

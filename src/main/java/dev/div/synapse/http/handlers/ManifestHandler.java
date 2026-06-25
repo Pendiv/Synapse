@@ -34,8 +34,8 @@ public final class ManifestHandler implements SynapseEndpoint {
     }
 
     @Override
-    public String httpMethod() {
-        return "GET";
+    public String[] methods() {
+        return new String[]{"GET"};
     }
 
     @Override

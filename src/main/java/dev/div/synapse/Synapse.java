@@ -2,9 +2,12 @@ package dev.div.synapse;
 
 import com.mojang.logging.LogUtils;
 import dev.div.synapse.config.SynapseConfig;
+import dev.div.synapse.core.ChatCapture;
 import dev.div.synapse.core.LogCapture;
+import dev.div.synapse.core.TickClock;
 import dev.div.synapse.http.SynapseHttpServer;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
@@ -39,6 +42,9 @@ public class Synapse {
     private void onClientSetup(final FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
             LogCapture.install();
+            // Forge-bus subscribers for tick counting (/wait, timed move) and chat capture (/chat).
+            MinecraftForge.EVENT_BUS.register(new TickClock());
+            MinecraftForge.EVENT_BUS.register(new ChatCapture());
             SynapseHttpServer.start();
         });
     }
