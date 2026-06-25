@@ -115,7 +115,10 @@ public final class CommandRunner {
             data.addProperty("command", command);
             try {
                 int result = server.getCommands().getDispatcher().execute(command, stack);
-                data.addProperty("success", result > 0);
+                // Reaching here means the command ran without throwing = success.
+                // The brigadier return value (often 0 for action commands that don't
+                // report a count) goes in resultValue, NOT the success flag.
+                data.addProperty("success", true);
                 data.addProperty("resultValue", result);
             } catch (CommandSyntaxException e) {
                 // Command failures (incl. selector misses, argument errors) are reported

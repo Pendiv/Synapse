@@ -54,8 +54,10 @@ public final class CommandHandler implements SynapseEndpoint {
         f.addProperty("method", "POST");
         f.addProperty("desc", "Execute a Minecraft command (leading slash optional). Runs at permission level 4.");
         f.addProperty("body", "The command string, e.g. 'give @s minecraft:diamond 64'.");
-        f.addProperty("returns", "{ command, success, resultValue, feedback[], stateAfter? }. "
-                + "Envelope ok=true if the command parsed and ran; data.success reflects the command's own result.");
+        f.addProperty("returns", "{ command, success, resultValue, feedback[], error?, stateAfter? }. "
+                + "Envelope ok=true if the request was handled. data.success=true means the command executed "
+                + "without error (data.error holds the message when false); data.resultValue is the command's "
+                + "numeric result (0 is normal for action commands).");
         JsonArray examples = new JsonArray();
         examples.add("give @s minecraft:diamond 64");
         examples.add("tp @s 0 100 0");

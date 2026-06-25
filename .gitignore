@@ -60,3 +60,10 @@ synapse-client.toml
 # ---- Internal-only (not part of the buildable public source) ----
 # Design docs / planning notes live locally but are kept out of the public repo.
 refs/
+
+# ---- Dev-only test mods (not part of the shipped/buildable public mod) ----
+# Third-party mod jars used only to exercise Synapse locally, and the gradle
+# script that declares them. A clean clone has neither, so it builds with the
+# minimum dependency set (the apply-from in build.gradle is a no-op).
+libs/
+dev-mods.gradle

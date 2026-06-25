@@ -176,3 +176,10 @@ tasks.named('jar', Jar).configure {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
 }
+
+// Optional dev-only extra mods for exercising Synapse against real content
+// (GregTech, Mekanism, Draconic Evolution, ...). The script and its jars are
+// gitignored, so a clean clone simply skips this — no extra build requirements.
+if (file('dev-mods.gradle').exists()) {
+    apply from: 'dev-mods.gradle'
+}
