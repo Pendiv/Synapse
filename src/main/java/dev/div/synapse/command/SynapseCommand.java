@@ -40,7 +40,8 @@ public final class SynapseCommand {
                 .append(fileLink(AgentDoc.docPathString())));
         if (AgentDoc.authEnabled()) {
             src.sendSystemMessage(Component.literal("Auth token: ").withStyle(ChatFormatting.GRAY)
-                    .append(copyLink("[copy token]", AgentDoc.authToken()))
+                    .append(copyLink("[copy token]", AgentDoc.authToken(),
+                            "Copy the auth token to your clipboard"))
                     .append(Component.literal(" — send it as header X-Synapse-Token (the bundled MCP server finds it automatically).")
                             .withStyle(ChatFormatting.DARK_GRAY)));
         }
@@ -48,9 +49,10 @@ public final class SynapseCommand {
                 .withStyle(ChatFormatting.GRAY)
                 .append(Component.literal("GET /manifest").withStyle(ChatFormatting.WHITE))
                 .append(Component.literal(". ").withStyle(ChatFormatting.GRAY))
-                .append(runLink("[copy prompt]", "/synapse prompt"))
+                .append(copyLink("[copy prompt]", AgentDoc.agentPrompt(),
+                        "Copy the paste-ready AI prompt to your clipboard"))
                 .append(Component.literal(" ").withStyle(ChatFormatting.GRAY))
-                .append(runLink("[status]", "/synapse status")));
+                .append(suggestLink("[status]", "/synapse status")));
         return 1;
     }
 
@@ -92,17 +94,23 @@ public final class SynapseCommand {
                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to open"))));
     }
 
-    private static MutableComponent runLink(String text, String command) {
+    // NOTE: a chat-click RUN_COMMAND routes through ClientPacketListener.sendUnsignedCommand, which
+    // does NOT execute Forge client commands — it forwards them to the integrated server, which has
+    // no /synapse, yielding "unknown or incomplete command". So for our client-only subcommands we
+    // never use RUN_COMMAND from chat: we either copy a value directly, or SUGGEST the command so the
+    // user submits it through the normal typed path (sendCommand), which does run client commands.
+    private static MutableComponent suggestLink(String text, String command) {
         return Component.literal(text).withStyle(style -> style
                 .withColor(ChatFormatting.AQUA)
-                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command)));
+                .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, command))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("Click to put " + command + " in chat, then press Enter"))));
     }
 
-    private static MutableComponent copyLink(String text, String value) {
+    private static MutableComponent copyLink(String text, String value, String tooltip) {
         return Component.literal(text).withStyle(style -> style
                 .withColor(ChatFormatting.GREEN)
                 .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, value))
-                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        Component.literal("Copy the auth token to your clipboard"))));
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(tooltip))));
     }
 }
