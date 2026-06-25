@@ -2,6 +2,7 @@ package dev.div.synapse;
 
 import com.mojang.logging.LogUtils;
 import dev.div.synapse.config.SynapseConfig;
+import dev.div.synapse.core.AgentDoc;
 import dev.div.synapse.core.ChatCapture;
 import dev.div.synapse.core.LogCapture;
 import dev.div.synapse.core.TickClock;
@@ -46,6 +47,8 @@ public class Synapse {
             MinecraftForge.EVENT_BUS.register(new TickClock());
             MinecraftForge.EVENT_BUS.register(new ChatCapture());
             SynapseHttpServer.start();
+            // Drop a machine-local onboarding file (with this host's port/auth) for AI agents.
+            AgentDoc.writeQuietly();
         });
     }
 }
