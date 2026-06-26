@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
 import dev.div.synapse.Synapse;
 import dev.div.synapse.config.AuthToken;
+import dev.div.synapse.config.InstanceRegistry;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.SynapseEndpoint;
 import dev.div.synapse.http.SynapseError;
@@ -52,6 +53,14 @@ public final class ManifestHandler implements SynapseEndpoint {
         auth.addProperty("required", AuthToken.enabled());
         auth.addProperty("header", SynapseHttpServer.AUTH_HEADER);
         data.add("auth", auth);
+
+        // Which instance this bridge is — lets one AI tell several environments apart and
+        // detect a stale registry entry whose port was reused (instanceId won't match).
+        JsonObject instance = new JsonObject();
+        instance.addProperty("name", InstanceRegistry.instanceName());
+        instance.addProperty("instanceId", SynapseHttpServer.instanceId());
+        instance.addProperty("port", SynapseHttpServer.port());
+        data.add("instance", instance);
 
         data.add("responseEnvelope", responseEnvelope());
 

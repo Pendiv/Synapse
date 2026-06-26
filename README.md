@@ -78,6 +78,22 @@ curl -s -H "$H" -H "Content-Type: application/json" -X POST 127.0.0.1:25599/play
 (The bundled MCP server and the `/synapse` command surface the same token, so a
 local AI agent needs no manual setup.)
 
+## Multiple instances (one AI, many worlds)
+
+Run Synapse in several Minecraft instances at once and drive them all from one
+agent. Each launch:
+
+- **Auto-ports** — if `25599` is busy it binds the next free port (`autoPort`,
+  on by default), so instances never collide.
+- **Advertises itself** in `~/.synapse/instances.json` (`name`, `port`,
+  `baseUrl`, per-launch `instanceId`, `pid`, token), removed on clean exit.
+
+The MCP server discovers them, so every tool takes an optional **`target`** (an
+instance name or port); `synapse_list` shows what's running. With one instance,
+`target` is optional. Raw HTTP works too — just point at the right port. The
+registry is `0600` and entries carry an `instanceId` so a stale entry whose port
+was reused is detected rather than silently driven.
+
 ## Configuration & security
 
 `synapse-client.toml` (in the config dir): `port`, `bindAddress`, `authToken`,

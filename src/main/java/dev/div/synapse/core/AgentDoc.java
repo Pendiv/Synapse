@@ -3,6 +3,7 @@ package dev.div.synapse.core;
 import dev.div.synapse.Synapse;
 import dev.div.synapse.config.AuthToken;
 import dev.div.synapse.config.SynapseConfig;
+import dev.div.synapse.http.SynapseHttpServer;
 import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.IOException;
@@ -42,7 +43,7 @@ public final class AgentDoc {
     }
 
     public static String baseUrl() {
-        return "http://" + SynapseConfig.BIND_ADDRESS.get() + ":" + SynapseConfig.PORT.get();
+        return "http://" + SynapseConfig.BIND_ADDRESS.get() + ":" + SynapseHttpServer.port();
     }
 
     public static boolean authEnabled() {

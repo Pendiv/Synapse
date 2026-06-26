@@ -1,13 +1,15 @@
 /**
- * Synapse MCP server — exposes the Synapse Minecraft HTTP bridge
- * (default http://127.0.0.1:25599) as MCP tools, so any MCP client
- * (Claude Code/Desktop, Codex, ...) can observe and control the game.
+ * Synapse MCP server — exposes the Synapse Minecraft HTTP bridge as MCP tools, so
+ * any MCP client (Claude Code/Desktop, Codex, ...) can observe and control the game.
  *
- * Config via env:
- *   SYNAPSE_URL   base URL of the bridge (default http://127.0.0.1:25599)
- *   SYNAPSE_TOKEN auth token, sent as X-Synapse-Token. If unset, the token is
- *                 auto-discovered from ~/.synapse/token (where the mod writes the
- *                 auto-generated token), so the local setup needs zero manual steps.
+ * Multi-instance: each running Minecraft advertises its bridge in
+ * ~/.synapse/instances.json. This server discovers them, so one AI can drive several
+ * environments at once — pass `target` (an instance name or port) to any tool, or call
+ * `synapse_list` to see what is running. With a single instance, `target` is optional.
+ *
+ * Config via env (override discovery for a fixed single target):
+ *   SYNAPSE_URL   base URL of the bridge (default: discovered, else http://127.0.0.1:25599)
+ *   SYNAPSE_TOKEN auth token, sent as X-Synapse-Token (default: discovered, else ~/.synapse/token)
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -16,93 +18,213 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-const BASE = (process.env.SYNAPSE_URL ?? "http://127.0.0.1:25599").replace(/\/+$/, "");
+type Json = any;
 
-/** Token from env, else the machine-local file the mod writes (~/.synapse/token). */
-function resolveToken(): string {
-  const fromEnv = process.env.SYNAPSE_TOKEN;
-  if (fromEnv && fromEnv.length > 0) return fromEnv;
+const SYN_DIR = join(homedir(), ".synapse");
+const ENV_URL = process.env.SYNAPSE_URL;
+const ENV_TOKEN = process.env.SYNAPSE_TOKEN;
+
+interface Instance {
+  name: string;
+  instanceId?: string;
+  gamedir?: string;
+  port: number;
+  baseUrl: string;
+  token?: string;
+  mcVersion?: string;
+}
+
+interface Target {
+  baseUrl: string;
+  token: string;
+  label: string;
+}
+
+/** A resolution problem (no/ambiguous target) — distinct from a connection failure. */
+class TargetError extends Error {}
+
+/** Token from the machine-local file the mod writes (used when an instance has none of its own). */
+function readToken(): string {
   try {
-    return readFileSync(join(homedir(), ".synapse", "token"), "utf8").trim();
+    return readFileSync(join(SYN_DIR, "token"), "utf8").trim();
   } catch {
     return "";
   }
 }
-const TOKEN = resolveToken();
 
-type Json = any;
-
-function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return TOKEN ? { ...extra, "X-Synapse-Token": TOKEN } : { ...extra };
+/** Live list of advertised instances (re-read each call, so start/stop is picked up). */
+function readInstances(): Instance[] {
+  try {
+    const raw = JSON.parse(readFileSync(join(SYN_DIR, "instances.json"), "utf8"));
+    const arr = Array.isArray(raw?.instances) ? raw.instances : [];
+    return arr.filter((i: any) => i && typeof i.port === "number" && typeof i.baseUrl === "string");
+  } catch {
+    return [];
+  }
 }
 
-/** One HTTP call to the bridge. Returns parsed JSON (or {raw,status} for non-JSON). */
-async function call(method: string, path: string, body?: string | object): Promise<Json> {
-  const init: RequestInit = { method, headers: authHeaders() };
+function pickToken(own?: string): string {
+  return own ?? ENV_TOKEN ?? readToken();
+}
+
+/** Resolve which bridge a call goes to. `target` may be an instance name, a port, or a URL. */
+function resolve(target?: string): Target {
+  const instances = readInstances();
+
+  if (target) {
+    const t = String(target);
+    const m = instances.find((i) => i.name === t || String(i.port) === t || i.baseUrl === t);
+    if (m) return { baseUrl: m.baseUrl, token: pickToken(m.token), label: m.name };
+    if (/^https?:\/\//i.test(t)) return { baseUrl: t.replace(/\/+$/, ""), token: pickToken(), label: t };
+    if (/^\d+$/.test(t)) return { baseUrl: `http://127.0.0.1:${t}`, token: pickToken(), label: `:${t}` };
+    const known = instances.map((i) => `${i.name}(:${i.port})`).join(", ") || "none";
+    throw new TargetError(`No Synapse instance "${t}". Running: ${known}. Call synapse_list.`);
+  }
+
+  if (ENV_URL) return { baseUrl: ENV_URL.replace(/\/+$/, ""), token: pickToken(), label: ENV_URL };
+  if (instances.length === 1) {
+    const i = instances[0];
+    return { baseUrl: i.baseUrl, token: pickToken(i.token), label: i.name };
+  }
+  if (instances.length === 0) return { baseUrl: "http://127.0.0.1:25599", token: pickToken(), label: "127.0.0.1:25599" };
+
+  const known = instances.map((i) => `${i.name}(:${i.port})`).join(", ");
+  throw new TargetError(
+    `${instances.length} Synapse instances are running — pass 'target' (name or port). Running: ${known}. Call synapse_list.`,
+  );
+}
+
+/** One HTTP call to a resolved bridge. Returns parsed JSON (or {raw,status} for non-JSON). */
+async function call(method: string, path: string, t: Target, body?: string | object): Promise<Json> {
+  const headers: Record<string, string> = t.token ? { "X-Synapse-Token": t.token } : {};
+  const init: RequestInit = { method, headers };
   if (body !== undefined) {
     if (typeof body === "string") {
       init.body = body;
     } else {
       init.body = JSON.stringify(body);
-      init.headers = authHeaders({ "Content-Type": "application/json" });
+      init.headers = { ...headers, "Content-Type": "application/json" };
     }
   }
-  const res = await fetch(BASE + path, init);
-  const text = await res.text();
+  const res = await fetch(t.baseUrl + path, init);
+  const txt = await res.text();
   try {
-    return JSON.parse(text);
+    return JSON.parse(txt);
   } catch {
-    return { raw: text, httpStatus: res.status };
+    return { raw: txt, httpStatus: res.status };
   }
 }
 
 const text = (data: Json) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
-const unreachable = (e: unknown) => ({
+const targetErr = (e: unknown) => ({
+  content: [{ type: "text" as const, text: String((e as Error).message) }],
+  isError: true,
+});
+
+const unreachable = (baseUrl: string, e: unknown) => ({
   content: [{
     type: "text" as const,
     text:
-      `Could not reach Synapse at ${BASE} (${String(e)}).\n` +
-      `Is Minecraft running with the Synapse mod, and are you in a world? ` +
-      `In-game, type /synapse to confirm.`,
+      `Could not reach Synapse at ${baseUrl} (${String(e)}).\n` +
+      `Is that Minecraft instance running with the Synapse mod, and are you in a world? ` +
+      `Call synapse_list to see running instances.`,
   }],
   isError: true,
 });
 
-/** Wrap a tool body so connection errors become a helpful message instead of a crash. */
-async function guard(fn: () => Promise<Json>) {
+/** Resolve the target, run the call, and turn resolution/connection problems into clear messages. */
+async function guard(target: string | undefined, fn: (t: Target) => Promise<Json>) {
+  let t: Target;
   try {
-    return text(await fn());
+    t = resolve(target);
   } catch (e) {
-    return unreachable(e);
+    return targetErr(e);
+  }
+  try {
+    return text(await fn(t));
+  } catch (e) {
+    return unreachable(t.baseUrl, e);
   }
 }
 
-const server = new McpServer({ name: "synapse", version: "1.0.0" });
+const TARGET = z
+  .string()
+  .optional()
+  .describe("Which Synapse instance (name or port) when several run; omit if only one. See synapse_list.");
+
+const server = new McpServer({ name: "synapse", version: "1.1.0" });
+
+server.registerTool(
+  "synapse_list",
+  {
+    title: "Synapse: list instances",
+    description:
+      "List running Synapse instances (name, port, reachable). When several environments run, pass a name or " +
+      "port as 'target' to the other tools to choose one. With a single instance, 'target' can be omitted.",
+    inputSchema: {},
+  },
+  async () => {
+    const instances = readInstances();
+    const checked = await Promise.all(
+      instances.map(async (i) => {
+        const tok = pickToken(i.token);
+        let reachable = false;
+        let stale: string | undefined;
+        try {
+          const res = await fetch(i.baseUrl + "/manifest", { headers: tok ? { "X-Synapse-Token": tok } : {} });
+          reachable = res.ok;
+          if (res.ok) {
+            // Detect a stale entry whose port was reused by a different live instance.
+            const live = (await res.json())?.data?.instance;
+            if (live && i.instanceId && live.instanceId && live.instanceId !== i.instanceId) {
+              stale = `port ${i.port} now serves "${live.name}" (different instance) — entry for "${i.name}" is stale`;
+            }
+          }
+        } catch {
+          reachable = false;
+        }
+        return { name: i.name, port: i.port, baseUrl: i.baseUrl, mcVersion: i.mcVersion, reachable, ...(stale ? { stale } : {}) };
+      }),
+    );
+    return text({
+      count: checked.length,
+      instances: checked,
+      note:
+        checked.length > 1
+          ? "Several instances — pass 'target' (name or port) to the other tools."
+          : checked.length === 0
+            ? "No instances advertised; tools fall back to http://127.0.0.1:25599 (or SYNAPSE_URL)."
+            : undefined,
+    });
+  },
+);
 
 server.registerTool(
   "synapse_manifest",
   {
     title: "Synapse: manifest",
     description:
-      "Self-describing capability dump: every endpoint, parameter, the state schema, error codes, and tips. " +
-      "Call this first to learn the full API.",
-    inputSchema: {},
+      "Self-describing capability dump: every endpoint, parameter, the state schema, error codes, the instance " +
+      "name, and tips. Call this first to learn the full API.",
+    inputSchema: { target: TARGET },
   },
-  async () => guard(() => call("GET", "/manifest")),
+  async ({ target }) => guard(target, (t) => call("GET", "/manifest", t)),
 );
 
 server.registerTool(
   "synapse_state",
   {
     title: "Synapse: state",
-    description: "Ground-truth player/world state (position, look, inventory, nearby entities, world). " +
+    description:
+      "Ground-truth player/world state (position, look, inventory, nearby entities, world). " +
       "Primary observation tool. NOT_IN_WORLD if on a menu.",
     inputSchema: {
       mode: z.enum(["summary", "full"]).optional().describe("summary (default) or full"),
+      target: TARGET,
     },
   },
-  async ({ mode }) => guard(() => call("GET", `/state?mode=${mode ?? "summary"}`)),
+  async ({ mode, target }) => guard(target, (t) => call("GET", `/state?mode=${mode ?? "summary"}`, t)),
 );
 
 server.registerTool(
@@ -114,9 +236,10 @@ server.registerTool(
       "the command's success. e.g. 'give @s minecraft:diamond 64', 'tp @s 0 100 0', 'time set day'.",
     inputSchema: {
       command: z.string().describe("The command text, without a leading slash."),
+      target: TARGET,
     },
   },
-  async ({ command }) => guard(() => call("POST", "/cmd", command)),
+  async ({ command, target }) => guard(target, (t) => call("POST", "/cmd", t, command)),
 );
 
 server.registerTool(
@@ -131,10 +254,11 @@ server.registerTool(
       action: z.enum(["open", "close", "clickSlot", "clickButton", "type"]).optional()
         .describe("Omit to observe; otherwise the GUI action."),
       params: z.record(z.any()).optional().describe("Fields for the action, e.g. {target:'inventory'} or {slot:0}."),
+      target: TARGET,
     },
   },
-  async ({ action, params }) => guard(() =>
-    action ? call("POST", "/gui", { action, ...(params ?? {}) }) : call("GET", "/gui")),
+  async ({ action, params, target }) =>
+    guard(target, (t) => (action ? call("POST", "/gui", t, { action, ...(params ?? {}) }) : call("GET", "/gui", t))),
 );
 
 server.registerTool(
@@ -147,9 +271,10 @@ server.registerTool(
     inputSchema: {
       action: z.enum(["look", "move", "use", "attack", "selectHotbar"]).describe("The player action."),
       params: z.record(z.any()).optional().describe("Fields for the action."),
+      target: TARGET,
     },
   },
-  async ({ action, params }) => guard(() => call("POST", "/player", { action, ...(params ?? {}) })),
+  async ({ action, params, target }) => guard(target, (t) => call("POST", "/player", t, { action, ...(params ?? {}) })),
 );
 
 server.registerTool(
@@ -159,9 +284,10 @@ server.registerTool(
     description: "Block until N in-world ticks pass (20 ticks = 1s). Use to let an action settle before observing.",
     inputSchema: {
       ticks: z.number().int().min(1).max(600).describe("Ticks to wait (1..600)."),
+      target: TARGET,
     },
   },
-  async ({ ticks }) => guard(() => call("GET", `/wait?ticks=${ticks}`)),
+  async ({ ticks, target }) => guard(target, (t) => call("GET", `/wait?ticks=${ticks}`, t)),
 );
 
 server.registerTool(
@@ -171,10 +297,11 @@ server.registerTool(
     description: "With no 'text': read recent received chat. With 'text': send chat (or a command if it starts with '/').",
     inputSchema: {
       text: z.string().optional().describe("Omit to read recent chat; otherwise the message to send."),
+      target: TARGET,
     },
   },
-  async ({ text: msg }) => guard(() =>
-    msg === undefined ? call("GET", "/chat") : call("POST", "/chat", { text: msg })),
+  async ({ text: msg, target }) =>
+    guard(target, (t) => (msg === undefined ? call("GET", "/chat", t) : call("POST", "/chat", t, { text: msg }))),
 );
 
 server.registerTool(
@@ -182,18 +309,24 @@ server.registerTool(
   {
     title: "Synapse: screenshot",
     description: "Capture the current frame as a PNG image (visual sanity check only; prefer synapse_state for logic).",
-    inputSchema: {},
+    inputSchema: { target: TARGET },
   },
-  async () => {
+  async ({ target }) => {
+    let t: Target;
     try {
-      const data = await call("GET", "/screenshot?format=base64");
+      t = resolve(target);
+    } catch (e) {
+      return targetErr(e);
+    }
+    try {
+      const data = await call("GET", "/screenshot?format=base64", t);
       const img = data?.data?.image;
       if (typeof img !== "string") {
         return text(data);
       }
       return { content: [{ type: "image" as const, data: img, mimeType: "image/png" }] };
     } catch (e) {
-      return unreachable(e);
+      return unreachable(t.baseUrl, e);
     }
   },
 );
@@ -202,7 +335,11 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // stdout is the JSON-RPC channel — logs must go to stderr.
-  console.error(`[synapse-mcp] connected; bridging ${BASE} (auth: ${TOKEN ? "on" : "off"})`);
+  const n = readInstances().length;
+  console.error(
+    `[synapse-mcp] connected; ${n} instance(s) discovered in ~/.synapse/instances.json` +
+      (ENV_URL ? ` (env override: ${ENV_URL})` : ""),
+  );
 }
 
 main().catch((e) => {

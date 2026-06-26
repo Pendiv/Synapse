@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.div.synapse.Synapse;
 import dev.div.synapse.config.AuthToken;
+import dev.div.synapse.config.InstanceRegistry;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.ContextCollector;
 import dev.div.synapse.core.LogCapture;
@@ -73,13 +74,31 @@ public final class SynapseHttpServer {
         }
     }
 
+    /** How many sequential ports to try when autoPort is on and the first is busy. */
+    private static final int PORT_SCAN_SPAN = 20;
+
+    /** A per-launch identity so a consumer can tell this live instance from a crash-stale entry. */
+    private static final String INSTANCE_ID = java.util.UUID.randomUUID().toString();
+
     private static HttpServer server;
     private static ExecutorService executor;
+    /** The port actually bound (may differ from config when autoPort steps past a busy port). */
+    private static volatile int actualPort = -1;
     /** Published immutably and swapped atomically; readers iterate a stable snapshot. */
     private static volatile Map<String, SynapseEndpoint> endpoints = Collections.emptyMap();
     private static Thread shutdownHook;
 
     private SynapseHttpServer() {
+    }
+
+    /** The port the bridge is actually listening on (falls back to the configured port if not started). */
+    public static int port() {
+        return actualPort > 0 ? actualPort : SynapseConfig.PORT.get();
+    }
+
+    /** This launch's unique instance id (also surfaced in /manifest's instance block). */
+    public static String instanceId() {
+        return INSTANCE_ID;
     }
 
     /** Endpoints in declaration order (used by /manifest and tests). */
@@ -125,14 +144,35 @@ public final class SynapseHttpServer {
         }
         Map<String, SynapseEndpoint> published = Collections.unmodifiableMap(map);
 
-        int port = SynapseConfig.PORT.get();
-        try {
-            server = HttpServer.create(new InetSocketAddress(bind, port), 0);
-        } catch (IOException e) {
-            Synapse.LOGGER.error("[Synapse] Could not bind HTTP server to {}:{} — {}", bind, port, e.toString());
-            server = null;
+        int startPort = SynapseConfig.PORT.get();
+        int span = SynapseConfig.AUTO_PORT.get() ? PORT_SCAN_SPAN : 1;
+        int scanMax = Math.min(startPort + span - 1, 65535);
+        int port = -1;
+        for (int p = startPort; p <= scanMax; p++) {
+            try {
+                server = HttpServer.create(new InetSocketAddress(bind, p), 0);
+                port = p;
+                break;
+            } catch (java.net.BindException busy) {
+                server = null;
+                if (span == 1) {
+                    Synapse.LOGGER.error("[Synapse] Could not bind HTTP server to {}:{} — {}", bind, p, busy.toString());
+                    return;
+                }
+                // autoPort: this port is taken (likely another instance) — try the next one.
+            } catch (IOException e) {
+                // A non-"address in use" failure won't be fixed by trying another port.
+                Synapse.LOGGER.error("[Synapse] Could not create HTTP server on {}:{} — {}", bind, p, e.toString());
+                server = null;
+                return;
+            }
+        }
+        if (server == null) {
+            Synapse.LOGGER.error("[Synapse] Could not bind HTTP server to {} on any port in {}..{}.",
+                    bind, startPort, scanMax);
             return;
         }
+        actualPort = port;
 
         endpoints = published;
         for (SynapseEndpoint e : published.values()) {
@@ -160,15 +200,24 @@ public final class SynapseHttpServer {
         } else {
             Synapse.LOGGER.info("[Synapse] Auth ENABLED (token from config).");
         }
-        Synapse.LOGGER.info("[Synapse] HTTP bridge listening on http://{}:{} ({} endpoints). Try GET /manifest.",
-                bind, port, published.size());
+        String baseUrl = "http://" + bind + ":" + port;
+        InstanceRegistry.register(INSTANCE_ID, port, baseUrl, AuthToken.effectiveToken(),
+                ManifestHandler.MC_VERSION, System.currentTimeMillis());
+
+        if (port != startPort) {
+            Synapse.LOGGER.info("[Synapse] Port {} was busy; bound {} instead (autoPort).", startPort, port);
+        }
+        Synapse.LOGGER.info("[Synapse] HTTP bridge '{}' listening on {} ({} endpoints). Try GET /manifest.",
+                InstanceRegistry.instanceName(), baseUrl, published.size());
     }
 
     public static synchronized void stop() {
         if (server != null) {
+            InstanceRegistry.unregister();
             server.stop(0);
             server = null;
         }
+        actualPort = -1;
         if (executor != null) {
             executor.shutdownNow();
             executor = null;
@@ -316,7 +365,9 @@ public final class SynapseHttpServer {
             return;
         }
         Headers h = exchange.getRequestHeaders();
-        int port = SynapseConfig.PORT.get();
+        // Validate against the port we ACTUALLY bound (autoPort may have stepped past the
+        // configured one) — the client's Host header carries the real port it connected to.
+        int port = port();
 
         String host = h.getFirst("Host");
         if (!hostAllowed(host, port)) {

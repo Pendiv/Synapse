@@ -21,11 +21,20 @@ AI client ⇄ synapse-mcp (this) ⇄ HTTP ⇄ Synapse mod ⇄ Minecraft
 
 ## Tools
 
-`synapse_manifest`, `synapse_state`, `synapse_cmd`, `synapse_gui`,
-`synapse_player`, `synapse_wait`, `synapse_chat`, `synapse_screenshot`
-(returns the frame as an image). They are thin proxies onto the bridge's
-endpoints; the model should call `synapse_manifest` first to learn parameter
-shapes.
+`synapse_list`, `synapse_manifest`, `synapse_state`, `synapse_cmd`,
+`synapse_gui`, `synapse_player`, `synapse_wait`, `synapse_chat`,
+`synapse_screenshot` (returns the frame as an image). They are thin proxies onto
+the bridge's endpoints; the model should call `synapse_manifest` first to learn
+parameter shapes.
+
+## Multiple instances
+
+This server discovers every running Synapse from `~/.synapse/instances.json` (the
+mod writes its `name`, `port`, and per-launch `instanceId` there). When more than
+one is up, pass **`target`** (an instance name or port) to any tool to choose
+one; with a single instance it's optional. `synapse_list` shows what's running
+(and flags a stale entry whose port was reused). Setting `SYNAPSE_URL` pins a
+single fixed target and skips discovery.
 
 ## Build
 

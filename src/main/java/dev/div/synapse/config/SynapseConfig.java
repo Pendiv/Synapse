@@ -15,6 +15,7 @@ public final class SynapseConfig {
 
     // [server]
     public static final ForgeConfigSpec.IntValue PORT;
+    public static final ForgeConfigSpec.BooleanValue AUTO_PORT;
     public static final ForgeConfigSpec.ConfigValue<String> BIND_ADDRESS;
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
     public static final ForgeConfigSpec.IntValue TIMEOUT_MS;
@@ -32,6 +33,10 @@ public final class SynapseConfig {
         b.comment("Synapse — AI-facing HTTP bridge. Client-only.").push("server");
         PORT = b.comment("HTTP server listen port.")
                 .defineInRange("port", 25599, 1, 65535);
+        AUTO_PORT = b.comment("If the configured port is busy, bind the next free port instead.",
+                        "Lets several Minecraft instances run Synapse at once; each advertises its",
+                        "actual port in ~/.synapse/instances.json so one AI can drive them all.")
+                .define("autoPort", true);
         BIND_ADDRESS = b.comment("Bind address. Strongly recommend 127.0.0.1 (localhost only).")
                 .define("bindAddress", "127.0.0.1");
         AUTH_TOKEN = b.comment("Auth token checked against the X-Synapse-Token header.",
