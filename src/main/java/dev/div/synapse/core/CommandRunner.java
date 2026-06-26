@@ -3,6 +3,7 @@ package dev.div.synapse.core;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.http.SynapseError;
 import dev.div.synapse.http.SynapseException;
 import net.minecraft.client.Minecraft;
@@ -50,6 +51,8 @@ public final class CommandRunner {
                     "Command is empty. POST the command text (leading slash optional).");
         }
         final String command = stripped;
+        // DEVELOPER-mode commands run at this op level (4 = full; lower blocks op/stop/ban/etc.).
+        final int permissionLevel = SynapseConfig.COMMAND_PERMISSION_LEVEL.get();
 
         // Resolve the server + player UUID on the client thread (no off-thread field reads).
         Resolved resolved = MainThread.run(() -> {
@@ -105,7 +108,7 @@ public final class CommandRunner {
                     sp.position(),
                     sp.getRotationVector(),
                     level,
-                    4,
+                    permissionLevel,
                     sp.getName().getString(),
                     sp.getDisplayName(),
                     server,

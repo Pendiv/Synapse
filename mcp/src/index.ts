@@ -153,7 +153,7 @@ const TARGET = z
   .optional()
   .describe("Which Synapse instance (name or port) when several run; omit if only one. See synapse_list.");
 
-const server = new McpServer({ name: "synapse", version: "1.2.0" });
+const server = new McpServer({ name: "synapse", version: "1.3.0" });
 
 server.registerTool(
   "synapse_list",

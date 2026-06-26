@@ -5,7 +5,9 @@ import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.ChatCapture;
+import dev.div.synapse.core.CommandRunner;
 import dev.div.synapse.core.MainThread;
+import dev.div.synapse.http.AccessControl;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.HttpUtil;
 import dev.div.synapse.http.SynapseEndpoint;
@@ -39,7 +41,13 @@ public final class ChatHandler implements SynapseEndpoint {
         if (text.isBlank()) {
             throw new SynapseException(SynapseError.BAD_REQUEST, "POST body needs a non-empty 'text'.");
         }
+        AccessControl.require(AccessControl.levelForChat(text));
         long timeout = SynapseConfig.TIMEOUT_MS.get();
+        if (AccessControl.isCommand(text)) {
+            // A '/'-command runs via /cmd semantics so it honours commandPermissionLevel
+            // (sending it as the player would run at the player's own op level, bypassing the cap).
+            return EndpointResult.json(CommandRunner.run(text, timeout));
+        }
         MainThread.run(() -> {
             ChatCapture.send(text);
             return null;
@@ -54,9 +62,11 @@ public final class ChatHandler implements SynapseEndpoint {
         JsonObject f = new JsonObject();
         f.addProperty("path", "/chat");
         f.addProperty("method", "GET | POST");
+        f.addProperty("requires", "GET: observe; POST: play (developer if text is a '/' command)");
         f.addProperty("desc", "GET: recent received chat lines. POST {text}: send chat (or a command if text "
                 + "starts with '/'). Mod feedback often goes to chat — read it here.");
-        f.addProperty("returns", "GET: { messages[], count }. POST: { sent }.");
+        f.addProperty("returns", "GET: { messages[], count }. POST plain text: { sent }. POST a '/'-command: "
+                + "runs it via /cmd semantics (honours commandPermissionLevel) and returns the command result.");
         return f;
     }
 }

@@ -50,9 +50,19 @@ public final class AgentDoc {
         return AuthToken.enabled();
     }
 
-    /** The effective auth token for this machine (may be auto-generated). Empty if auth is off. */
+    /** The effective auth token for this machine (the ceiling-level token). Empty if auth is off. */
     public static String authToken() {
         return AuthToken.effectiveToken();
+    }
+
+    /** The configured access ceiling (max any token can grant), e.g. "play". */
+    public static String accessCeiling() {
+        return AuthToken.ceiling().id();
+    }
+
+    /** Absolute path to the per-level tokens file. */
+    public static String tokensPath() {
+        return AuthToken.tokensFile().toAbsolutePath().toString();
     }
 
     public static Path docFile() {
@@ -73,8 +83,10 @@ public final class AgentDoc {
         return PROMPT
                 .replace("__BASE__", baseUrl())
                 .replace("__AUTHHINT__", authEnabled()
-                        ? "Authenticate every request with the X-Synapse-Token header (token in "
-                                + tokenHint() + "; the bundled MCP server reads it automatically)."
+                        ? "Authenticate every request with the X-Synapse-Token header (token in " + tokenHint()
+                                + "; the bundled MCP server reads it automatically). Your access level is set by which "
+                                + "token you send (default grants '" + AuthToken.ceiling().id() + "') and is shown in "
+                                + "/manifest's 'access' block; /cmd, '/'-commands and creative need a developer-level token."
                         : "No auth token is set.");
     }
 
@@ -110,6 +122,10 @@ public final class AgentDoc {
                               + tokenHint() + " (machine-local; the bundled MCP server and `/synapse` read it). "
                               + "This file deliberately does NOT print the token, so it is safe to sync or ship."
                             : "disabled (token empty; localhost only)") + "\n"
+                    + "- Access: token-gated. Per-level tokens are in `" + AuthToken.tokensFile().toAbsolutePath()
+                    + "` (observe / play / developer). The token you hand the agent sets its level (capped at the "
+                    + "`accessLevel` ceiling, default `play`). **developer** = arbitrary `/cmd` + commands + creative, "
+                    + "at your own risk. `GET /manifest` reports the agent's current `access`.\n"
                     + "- Minecraft 1.20.1 (Forge), client-side only.\n\n"
                     + "## One-time setup (human)\n\n"
                     + "Commands and world state require being IN a world. Load a singleplayer\n"

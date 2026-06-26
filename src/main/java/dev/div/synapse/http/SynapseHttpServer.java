@@ -7,6 +7,7 @@ import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.div.synapse.Synapse;
+import dev.div.synapse.config.AccessLevel;
 import dev.div.synapse.config.AuthToken;
 import dev.div.synapse.config.InstanceRegistry;
 import dev.div.synapse.config.SynapseConfig;
@@ -180,15 +181,17 @@ public final class SynapseHttpServer {
         shutdownHook = new Thread(SynapseHttpServer::stop, "synapse-http-shutdown");
         Runtime.getRuntime().addShutdownHook(shutdownHook);
 
-        if (AuthToken.source() == AuthToken.Source.GENERATED || AuthToken.source() == AuthToken.Source.FILE) {
-            Synapse.LOGGER.info("[Synapse] Auth ENABLED with an auto-generated token. The agent reads it from {} "
-                    + "(also shown by /synapse and in AGENT.md). The token value is never logged.",
-                    AuthToken.tokenFile().toAbsolutePath());
-        } else if (!AuthToken.enabled()) {
-            Synapse.LOGGER.warn("[Synapse] authToken is set empty — auth is DISABLED. Anyone who can reach "
-                    + "{}:{} can run arbitrary commands. Keep bindAddress on 127.0.0.1.", bind, port);
+        AccessLevel ceiling = AuthToken.ceiling();
+        if (AuthToken.source() == AuthToken.Source.CONFIG) {
+            Synapse.LOGGER.info("[Synapse] Auth ENABLED (single token from config). Access ceiling: {}.", ceiling.id());
         } else {
-            Synapse.LOGGER.info("[Synapse] Auth ENABLED (token from config).");
+            Synapse.LOGGER.info("[Synapse] Auth ENABLED. Per-level tokens in {}; the ceiling-level token is mirrored "
+                    + "to {} for the MCP. Access ceiling: {}. Tokens are never logged.",
+                    AuthToken.tokensFile().toAbsolutePath(), AuthToken.tokenFile().toAbsolutePath(), ceiling.id());
+        }
+        if (ceiling == AccessLevel.DEVELOPER) {
+            Synapse.LOGGER.warn("[Synapse] accessLevel ceiling is DEVELOPER — an agent with the developer token can run "
+                    + "arbitrary level-{} commands. At your own risk.", SynapseConfig.COMMAND_PERMISSION_LEVEL.get());
         }
         String baseUrl = "http://" + bind + ":" + port;
         InstanceRegistry.register(INSTANCE_ID, port, baseUrl, AuthToken.effectiveToken(),
@@ -241,7 +244,7 @@ public final class SynapseHttpServer {
                 return;
             }
             requireLocalRequest(exchange);
-            requireAuth(exchange);
+            AccessControl.setCurrent(requireAuth(exchange));
             requireMethod(exchange, endpoint.methods());
 
             EndpointResult result = endpoint.handle(exchange);
@@ -275,6 +278,7 @@ public final class SynapseHttpServer {
         } catch (IOException io) {
             Synapse.LOGGER.error("[Synapse] Failed to write response for {}", path, io);
         } finally {
+            AccessControl.clearCurrent();
             exchange.close();
         }
     }
@@ -309,6 +313,7 @@ public final class SynapseHttpServer {
         } catch (IOException io) {
             Synapse.LOGGER.error("[Synapse] Failed to write error response", io);
         } finally {
+            AccessControl.clearCurrent();
             exchange.close();
         }
     }
@@ -388,17 +393,17 @@ public final class SynapseHttpServer {
         }
     }
 
-    private static void requireAuth(HttpExchange exchange) throws SynapseException {
-        String token = AuthToken.effectiveToken();
-        if (token.isEmpty()) {
-            return; // auth disabled (only if explicitly forced off on a loopback bind)
-        }
+    /** Authenticates and returns the {@link AccessLevel} granted to this request. */
+    private static AccessLevel requireAuth(HttpExchange exchange) throws SynapseException {
         String provided = exchange.getRequestHeaders().getFirst(AUTH_HEADER);
-        if (provided == null || !RequestGuards.constantTimeEquals(provided, token)) {
+        AccessLevel tokenLevel = AuthToken.levelForToken(provided);
+        if (tokenLevel == null) {
             throw new SynapseException(SynapseError.UNAUTHORIZED,
                     "Missing or invalid " + AUTH_HEADER + " header.")
                     .detail("header", AUTH_HEADER);
         }
+        // The token's level, lowered to the configured ceiling (developer stays opt-in).
+        return tokenLevel.cappedAt(AuthToken.ceiling());
     }
 
     private static void requireMethod(HttpExchange exchange, String[] methods) throws SynapseException {

@@ -6,6 +6,8 @@ import com.sun.net.httpserver.HttpExchange;
 import dev.div.synapse.Synapse;
 import dev.div.synapse.config.AuthToken;
 import dev.div.synapse.config.InstanceRegistry;
+import dev.div.synapse.config.SynapseConfig;
+import dev.div.synapse.http.AccessControl;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.SynapseEndpoint;
 import dev.div.synapse.http.SynapseError;
@@ -53,6 +55,20 @@ public final class ManifestHandler implements SynapseEndpoint {
         auth.addProperty("required", AuthToken.enabled());
         auth.addProperty("header", SynapseHttpServer.AUTH_HEADER);
         data.add("auth", auth);
+
+        // What THIS request may do: its level (from the token presented), capped at the ceiling.
+        JsonObject access = new JsonObject();
+        access.addProperty("level", AccessControl.level().id());
+        access.addProperty("ceiling", AuthToken.ceiling().id());
+        access.addProperty("commandPermissionLevel", SynapseConfig.COMMAND_PERMISSION_LEVEL.get());
+        JsonObject levels = new JsonObject();
+        levels.addProperty("observe", "read-only: /manifest /state /gui(GET) /chat(GET) /screenshot /wait");
+        levels.addProperty("play", "observe + what a player can do: /player, /gui POST (not creative), /chat plain message");
+        levels.addProperty("developer", "play + /cmd, '/'-chat commands, creative inventory — FULL POWER, at your own risk");
+        access.add("levels", levels);
+        access.addProperty("note", "Your 'level' is set by the token you present (per-level tokens live in "
+                + "~/.synapse/tokens.json) and capped at 'ceiling'. Operations above your level return ACCESS_DENIED (403).");
+        data.add("access", access);
 
         // Which instance this bridge is — lets one AI tell several environments apart and
         // detect a stale registry entry whose port was reused (instanceId won't match).
@@ -132,7 +148,8 @@ public final class ManifestHandler implements SynapseEndpoint {
         JsonArray arr = new JsonArray();
         arr.add("Use /state to confirm logic; use /screenshot only to confirm visuals.");
         arr.add("Out of world (menu screens) /cmd and /state return NOT_IN_WORLD — check context.inWorld first.");
-        arr.add("/cmd takes a raw command (leading slash optional) and runs at permission level 4.");
+        arr.add("/cmd takes a raw command (leading slash optional), needs the developer access level, and runs at "
+                + "the configured commandPermissionLevel (see access.commandPermissionLevel). A '/'-chat command runs the same way.");
         arr.add("Every response carries recent logs and a lightweight context — read them to self-correct.");
         arr.add("Use POST /batch to run several ops in one request (e.g. cmd -> wait -> state) and cut round-trips.");
         return arr;

@@ -72,3 +72,6 @@ dev-mods.gradle
 # build/ above already covers mcp/build/. Ignore deps + the local smoke test.
 node_modules/
 mcp/test-client.mjs
+
+# Stray source-tree zip some local tool keeps creating
+*.zip

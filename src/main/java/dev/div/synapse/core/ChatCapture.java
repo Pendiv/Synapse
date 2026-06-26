@@ -40,8 +40,12 @@ public final class ChatCapture {
     }
 
     /**
-     * Sends a chat message, or a command if it starts with {@code /}. Must run on
-     * the main thread.
+     * Sends a plain chat message. Must run on the main thread.
+     *
+     * <p>Commands are deliberately NOT executed here: {@code player.connection.sendCommand}
+     * runs at the player's own server op level, which would sidestep
+     * {@code commandPermissionLevel}. The handlers route a {@code '/'}-prefixed text through
+     * {@link CommandRunner} instead, so a string reaching this method is always plain chat.
      */
     public static void send(String text) throws SynapseException {
         LocalPlayer player = Minecraft.getInstance().player;
@@ -52,10 +56,6 @@ public final class ChatCapture {
         if (t.isEmpty()) {
             throw new SynapseException(SynapseError.BAD_REQUEST, "Empty chat text.");
         }
-        if (t.startsWith("/")) {
-            player.connection.sendCommand(t.substring(1));
-        } else {
-            player.connection.sendChat(t);
-        }
+        player.connection.sendChat(t);
     }
 }

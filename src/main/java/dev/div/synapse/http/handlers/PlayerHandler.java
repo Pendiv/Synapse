@@ -3,8 +3,10 @@ package dev.div.synapse.http.handlers;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
+import dev.div.synapse.config.AccessLevel;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.PlayerController;
+import dev.div.synapse.http.AccessControl;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.HttpUtil;
 import dev.div.synapse.http.SynapseEndpoint;
@@ -24,6 +26,7 @@ public final class PlayerHandler implements SynapseEndpoint {
 
     @Override
     public EndpointResult handle(HttpExchange exchange) throws Exception {
+        AccessControl.require(AccessLevel.PLAY);
         JsonObject body = HttpUtil.parseJsonBody(exchange);
         return EndpointResult.json(PlayerController.act(body, SynapseConfig.TIMEOUT_MS.get()));
     }
@@ -33,6 +36,7 @@ public final class PlayerHandler implements SynapseEndpoint {
         JsonObject f = new JsonObject();
         f.addProperty("path", "/player");
         f.addProperty("method", "POST");
+        f.addProperty("requires", "play");
         f.addProperty("desc", "Physically control the player. Interactions target whatever the player is looking at "
                 + "(state.lookingAt / mc.hitResult).");
         JsonArray actions = new JsonArray();

@@ -41,9 +41,12 @@ public final class SynapseCommand {
         if (AgentDoc.authEnabled()) {
             src.sendSystemMessage(Component.literal("Auth token: ").withStyle(ChatFormatting.GRAY)
                     .append(copyLink("[copy token]", AgentDoc.authToken(),
-                            "Copy the auth token to your clipboard"))
-                    .append(Component.literal(" — send it as header X-Synapse-Token (the bundled MCP server finds it automatically).")
-                            .withStyle(ChatFormatting.DARK_GRAY)));
+                            "Copy the ceiling-level auth token to your clipboard"))
+                    .append(Component.literal(" — header X-Synapse-Token (the MCP finds it). Access ceiling: ")
+                            .withStyle(ChatFormatting.DARK_GRAY))
+                    .append(Component.literal(AgentDoc.accessCeiling()).withStyle(ChatFormatting.AQUA))
+                    .append(Component.literal(". Per-level tokens: ").withStyle(ChatFormatting.DARK_GRAY))
+                    .append(fileLink(AgentDoc.tokensPath())));
         }
         src.sendSystemMessage(Component.literal("Point your AI at the URL and have it call ")
                 .withStyle(ChatFormatting.GRAY)
@@ -74,6 +77,7 @@ public final class SynapseCommand {
         ctx.getSource().sendSystemMessage(Component.literal(
                         "Synapse: " + AgentDoc.baseUrl()
                                 + " | auth " + (AgentDoc.authEnabled() ? "on" : "off")
+                                + " | access " + AgentDoc.accessCeiling()
                                 + " | inWorld " + inWorld
                                 + " | screen " + screen)
                 .withStyle(ChatFormatting.GRAY));

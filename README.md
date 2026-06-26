@@ -71,7 +71,7 @@ H="X-Synapse-Token: $TOKEN"
 
 curl -s -H "$H" 127.0.0.1:25599/manifest | jq
 curl -s -H "$H" "127.0.0.1:25599/state?mode=summary" | jq .data
-curl -s -H "$H" -X POST 127.0.0.1:25599/cmd -d "give @s minecraft:diamond 64" | jq .data
+curl -s -H "$H" -X POST 127.0.0.1:25599/cmd -d "give @s minecraft:diamond 64" | jq .data  # needs accessLevel=developer
 curl -s -H "$H" -H "Content-Type: application/json" -X POST 127.0.0.1:25599/gui    -d '{"action":"open","target":"inventory"}'
 curl -s -H "$H" -H "Content-Type: application/json" -X POST 127.0.0.1:25599/player -d '{"action":"move","forward":true,"ticks":20}'
 ```
@@ -95,11 +95,33 @@ instance name or port); `synapse_list` shows what's running. With one instance,
 registry is `0600` and entries carry an `instanceId` so a stale entry whose port
 was reused is detected rather than silently driven.
 
+## Access levels (what the AI may do)
+
+The **token carries the privilege**. Synapse mints one token per level, and the
+granted level is `min(token's level, accessLevel ceiling)` — so even a
+prompt-injected agent is bounded by the level you handed it.
+
+| Level | Can do |
+|---|---|
+| `observe` | read-only: `/manifest`, `/state`, `/gui`(GET), `/chat`(GET), `/screenshot`, `/wait` |
+| `play` *(default)* | observe + what a player can do: `/player`, `/gui` POST (not creative), plain `/chat` |
+| `developer` | play + **arbitrary `/cmd`, `/`-chat commands, creative inventory — full power, at your own risk** |
+
+- Per-level tokens live in `~/.synapse/tokens.json`; `~/.synapse/token` mirrors the
+  ceiling-level token (what the bundled MCP reads). Hand an agent the token for the
+  level you want it to have.
+- `accessLevel` (default `play`) is the ceiling — **`developer` is opt-in**: a
+  developer token is capped to the ceiling until you raise it. An op above your
+  level returns `ACCESS_DENIED` (403). `GET /manifest` reports your current `access`.
+- `commandPermissionLevel` (default 4) is the op-level `developer` commands run at;
+  lower it (e.g. 2) to allow `give`/`tp`/`time` but block `op`/`stop`/`ban`.
+
 ## Configuration & security
 
 `synapse-client.toml` (in the config dir): `port`, `autoPort`, `bindAddress`,
-`authToken`, `timeoutMs`, `maxBodyBytes`, `batchBudgetMs`, `stateRadius`,
-`logBufferSize`, `captureAllModLogs`, `screenshotEnabled`.
+`authToken`, `accessLevel`, `commandPermissionLevel`, `timeoutMs`, `maxBodyBytes`,
+`batchBudgetMs`, `stateRadius`, `logBufferSize`, `captureAllModLogs`,
+`screenshotEnabled`.
 
 The bridge runs *inside your game client*, and `/cmd` executes Minecraft
 commands at permission level 4. Treat the port as a control surface and keep it

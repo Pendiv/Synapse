@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
+import dev.div.synapse.config.AccessLevel;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.ChatCapture;
 import dev.div.synapse.core.CommandRunner;
@@ -12,6 +13,7 @@ import dev.div.synapse.core.MainThread;
 import dev.div.synapse.core.PlayerController;
 import dev.div.synapse.core.StateCollector;
 import dev.div.synapse.core.TickClock;
+import dev.div.synapse.http.AccessControl;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.HttpUtil;
 import dev.div.synapse.http.SynapseEndpoint;
@@ -128,6 +130,7 @@ public final class BatchHandler implements SynapseEndpoint {
         String name = HttpUtil.str(op, "op", "").trim().toLowerCase(Locale.ROOT);
         switch (name) {
             case "cmd": {
+                AccessControl.require(AccessLevel.DEVELOPER);
                 String command = HttpUtil.str(op, "command", "");
                 if (command.isBlank()) {
                     throw new SynapseException(SynapseError.BAD_REQUEST, "cmd op needs a non-empty 'command'.");
@@ -145,14 +148,23 @@ public final class BatchHandler implements SynapseEndpoint {
                 throw new SynapseException(SynapseError.BAD_REQUEST, "state mode must be 'summary' or 'full'.");
             }
             case "player":
+                AccessControl.require(AccessLevel.PLAY);
                 return PlayerController.act(op, timeout);
             case "gui":
-                return op.has("action") ? GuiController.act(op, timeout) : GuiController.observe(timeout);
+                if (op.has("action")) {
+                    AccessControl.require(AccessControl.levelForGui(op));
+                    return GuiController.act(op, timeout);
+                }
+                return GuiController.observe(timeout);
             case "chat": {
                 if (op.has("text") && !op.get("text").isJsonNull()) {
                     String text = HttpUtil.str(op, "text", "");
                     if (text.isBlank()) {
                         throw new SynapseException(SynapseError.BAD_REQUEST, "chat 'text' is empty.");
+                    }
+                    AccessControl.require(AccessControl.levelForChat(text));
+                    if (AccessControl.isCommand(text)) {
+                        return CommandRunner.run(text, timeout); // honours commandPermissionLevel
                     }
                     MainThread.run(() -> {
                         ChatCapture.send(text);
@@ -194,7 +206,8 @@ public final class BatchHandler implements SynapseEndpoint {
         f.addProperty("desc", "Run several operations in one request, in order — cuts observe/act/verify "
                 + "round-trips. Body: { ops:[...], stopOnError?:false }. Each op is one of: "
                 + "{op:'cmd', command} | {op:'state', mode} | {op:'player', action, ...} | "
-                + "{op:'gui', action?, ...} | {op:'chat', text?} | {op:'wait', ticks}. Max " + MAX_OPS + " ops.");
+                + "{op:'gui', action?, ...} | {op:'chat', text?} | {op:'wait', ticks}. Max " + MAX_OPS + " ops. "
+                + "Each op obeys the same accessLevel as its endpoint (a disallowed op fails in-band).");
         JsonArray example = new JsonArray();
         example.add("{\"op\":\"cmd\",\"command\":\"give @s minecraft:diamond 64\"}");
         example.add("{\"op\":\"wait\",\"ticks\":2}");

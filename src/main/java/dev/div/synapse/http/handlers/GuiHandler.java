@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.GuiController;
+import dev.div.synapse.http.AccessControl;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.HttpUtil;
 import dev.div.synapse.http.SynapseEndpoint;
@@ -32,6 +33,7 @@ public final class GuiHandler implements SynapseEndpoint {
             return EndpointResult.json(GuiController.observe(timeout));
         }
         JsonObject body = HttpUtil.parseJsonBody(exchange);
+        AccessControl.require(AccessControl.levelForGui(body));
         return EndpointResult.json(GuiController.act(body, timeout));
     }
 
@@ -40,6 +42,7 @@ public final class GuiHandler implements SynapseEndpoint {
         JsonObject f = new JsonObject();
         f.addProperty("path", "/gui");
         f.addProperty("method", "GET | POST");
+        f.addProperty("requires", "GET: observe; POST: play (developer to open the creative inventory)");
         f.addProperty("desc", "GET: read the open Screen (class, title, widgets[{index,type,label,x,y,active,value?}], "
                 + "container{slots,carried}). POST: act on it.");
         JsonArray actions = new JsonArray();

@@ -18,6 +18,8 @@ public final class SynapseConfig {
     public static final ForgeConfigSpec.BooleanValue AUTO_PORT;
     public static final ForgeConfigSpec.ConfigValue<String> BIND_ADDRESS;
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
+    public static final ForgeConfigSpec.EnumValue<AccessLevel> ACCESS_LEVEL;
+    public static final ForgeConfigSpec.IntValue COMMAND_PERMISSION_LEVEL;
     public static final ForgeConfigSpec.IntValue TIMEOUT_MS;
     public static final ForgeConfigSpec.IntValue MAX_BODY_BYTES;
     public static final ForgeConfigSpec.IntValue BATCH_BUDGET_MS;
@@ -45,6 +47,17 @@ public final class SynapseConfig {
                         "first run and saves it to ~/.synapse/token (the bundled MCP server reads it from there,",
                         "and /synapse prints it; AGENT.md points to the file). Set an explicit value to manage your own secret.")
                 .define("authToken", "");
+        ACCESS_LEVEL = b.comment("How much the AI may do (gates every mutating op, so even a prompt-injected agent is bounded):",
+                        "  OBSERVE   - read-only (state, gui/chat reads, screenshot, wait).",
+                        "  PLAY      - observe + what a human player could do (move, click, plain chat). [default]",
+                        "  DEVELOPER - play + arbitrary commands (/cmd, '/'-chat, creative inventory). FULL POWER,",
+                        "              AT YOUR OWN RISK: a misled AI can run any level-commandPermissionLevel command.",
+                        "Changing this takes effect on restart (the mirrored ~/.synapse/token tracks the ceiling then).")
+                .defineEnum("accessLevel", AccessLevel.PLAY);
+        COMMAND_PERMISSION_LEVEL = b.comment("Op permission level that DEVELOPER-mode commands run at (0-4).",
+                        "4 = full (current behaviour). Lower it (e.g. 2) to allow give/tp/time/summon but block",
+                        "op/stop/ban/deop, so a developer-mode AI still cannot escalate or break the server.")
+                .defineInRange("commandPermissionLevel", 4, 0, 4);
         TIMEOUT_MS = b.comment("Timeout (ms) for work scheduled onto the Minecraft main thread.")
                 .defineInRange("timeoutMs", 5000, 100, 120_000);
         MAX_BODY_BYTES = b.comment("Maximum accepted request body size in bytes (guards against memory-exhaustion).",

@@ -3,10 +3,12 @@ package dev.div.synapse.http.handlers;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
+import dev.div.synapse.config.AccessLevel;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.CommandRunner;
 import dev.div.synapse.core.MainThread;
 import dev.div.synapse.core.StateCollector;
+import dev.div.synapse.http.AccessControl;
 import dev.div.synapse.http.EndpointResult;
 import dev.div.synapse.http.HttpUtil;
 import dev.div.synapse.http.SynapseEndpoint;
@@ -28,6 +30,7 @@ public final class CommandHandler implements SynapseEndpoint {
 
     @Override
     public EndpointResult handle(HttpExchange exchange) throws Exception {
+        AccessControl.require(AccessLevel.DEVELOPER);
         String body = HttpUtil.readBody(exchange);
         if (body == null || body.strip().isEmpty()) {
             throw new SynapseException(SynapseError.BAD_REQUEST,
@@ -52,7 +55,9 @@ public final class CommandHandler implements SynapseEndpoint {
         JsonObject f = new JsonObject();
         f.addProperty("path", "/cmd");
         f.addProperty("method", "POST");
-        f.addProperty("desc", "Execute a Minecraft command (leading slash optional). Runs at permission level 4.");
+        f.addProperty("requires", "developer");
+        f.addProperty("desc", "Execute a Minecraft command (leading slash optional). DEVELOPER accessLevel only; "
+                + "runs at the configured commandPermissionLevel (default 4).");
         f.addProperty("body", "The command string, e.g. 'give @s minecraft:diamond 64'.");
         f.addProperty("returns", "{ command, success, resultValue, feedback[], error?, stateAfter? }. "
                 + "Envelope ok=true if the request was handled. data.success=true means the command executed "

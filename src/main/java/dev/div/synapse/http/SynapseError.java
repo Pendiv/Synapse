@@ -8,6 +8,7 @@ public enum SynapseError {
     NOT_IN_WORLD(409, "Player or integrated server not available (out of world / on a menu screen)."),
     UNAUTHORIZED(401, "Auth token missing or mismatched."),
     FORBIDDEN(403, "Request rejected by the local-origin guard (disallowed Host/Origin, or a cross-site browser request)."),
+    ACCESS_DENIED(403, "Operation not permitted at the configured accessLevel (raise it in synapse-client.toml)."),
     BAD_REQUEST(400, "Malformed request (bad params, body, method, or unknown endpoint)."),
     COMMAND_FAILED(500, "A command threw or otherwise failed during execution."),
     TIMEOUT(504, "Main-thread work did not complete within the configured timeout."),
