@@ -20,6 +20,7 @@ public final class SynapseConfig {
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
     public static final ForgeConfigSpec.IntValue TIMEOUT_MS;
     public static final ForgeConfigSpec.IntValue MAX_BODY_BYTES;
+    public static final ForgeConfigSpec.IntValue BATCH_BUDGET_MS;
     // [state]
     public static final ForgeConfigSpec.DoubleValue STATE_RADIUS;
     public static final ForgeConfigSpec.IntValue LOG_BUFFER_SIZE;
@@ -42,13 +43,17 @@ public final class SynapseConfig {
         AUTH_TOKEN = b.comment("Auth token checked against the X-Synapse-Token header.",
                         "Leave EMPTY for secure-by-default: Synapse auto-generates a strong random token on",
                         "first run and saves it to ~/.synapse/token (the bundled MCP server reads it from there,",
-                        "and /synapse + AGENT.md print it). Set an explicit value to manage your own secret.")
+                        "and /synapse prints it; AGENT.md points to the file). Set an explicit value to manage your own secret.")
                 .define("authToken", "");
         TIMEOUT_MS = b.comment("Timeout (ms) for work scheduled onto the Minecraft main thread.")
                 .defineInRange("timeoutMs", 5000, 100, 120_000);
         MAX_BODY_BYTES = b.comment("Maximum accepted request body size in bytes (guards against memory-exhaustion).",
                         "Commands and JSON payloads are tiny; the default 1 MiB is generous.")
                 .defineInRange("maxBodyBytes", 1_048_576, 1_024, 67_108_864);
+        BATCH_BUDGET_MS = b.comment("Wall-clock budget (ms) for one POST /batch request across all its ops.",
+                        "Bounds how long a single batch can hold a worker thread (e.g. several /wait ops);",
+                        "ops past the budget are reported as skipped. Keep it >= one /wait (~37s).")
+                .defineInRange("batchBudgetMs", 60_000, 1_000, 600_000);
         b.pop();
 
         b.push("state");

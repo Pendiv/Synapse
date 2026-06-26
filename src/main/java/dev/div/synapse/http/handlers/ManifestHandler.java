@@ -97,7 +97,8 @@ public final class ManifestHandler implements SynapseEndpoint {
         o.addProperty("data", "object|null — endpoint-specific payload (null on error)");
         o.addProperty("error", "object|null — { code, message, hint?, currentScreen?, suggestions[] } on failure");
         o.addProperty("logs", "string[] — recent log lines (size = config logBufferSize)");
-        o.addProperty("context", "object — { inWorld, screen, dimension } returned every call");
+        o.addProperty("context", "object — { capturedAtMs, inWorld, screen, dimension } returned every call. "
+                + "A per-tick snapshot, so it may lag the response by ~1 tick — 'data' is authoritative.");
         o.addProperty("ts", "number — server epoch millis");
         return o;
     }
@@ -133,7 +134,7 @@ public final class ManifestHandler implements SynapseEndpoint {
         arr.add("Out of world (menu screens) /cmd and /state return NOT_IN_WORLD — check context.inWorld first.");
         arr.add("/cmd takes a raw command (leading slash optional) and runs at permission level 4.");
         arr.add("Every response carries recent logs and a lightweight context — read them to self-correct.");
-        arr.add("Batch operations (/batch) are planned for v1.1; for now issue commands sequentially.");
+        arr.add("Use POST /batch to run several ops in one request (e.g. cmd -> wait -> state) and cut round-trips.");
         return arr;
     }
 

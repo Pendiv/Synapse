@@ -153,7 +153,7 @@ const TARGET = z
   .optional()
   .describe("Which Synapse instance (name or port) when several run; omit if only one. See synapse_list.");
 
-const server = new McpServer({ name: "synapse", version: "1.1.0" });
+const server = new McpServer({ name: "synapse", version: "1.2.0" });
 
 server.registerTool(
   "synapse_list",
@@ -302,6 +302,24 @@ server.registerTool(
   },
   async ({ text: msg, target }) =>
     guard(target, (t) => (msg === undefined ? call("GET", "/chat", t) : call("POST", "/chat", t, { text: msg }))),
+);
+
+server.registerTool(
+  "synapse_batch",
+  {
+    title: "Synapse: batch",
+    description:
+      "Run several operations in ONE request, in order — cuts observe/act/verify round-trips. Each op is one " +
+      "of: {op:'cmd', command} | {op:'state', mode} | {op:'player', action, ...} | {op:'gui', action?, ...} | " +
+      "{op:'chat', text?} | {op:'wait', ticks}. Returns { results:[{index,op,ok,data|error}], count, ranAll }.",
+    inputSchema: {
+      ops: z.array(z.record(z.any())).describe("Ordered ops, e.g. [{op:'cmd',command:'...'},{op:'wait',ticks:2},{op:'state'}]."),
+      stopOnError: z.boolean().optional().describe("Abort remaining ops after the first failure (default false)."),
+      target: TARGET,
+    },
+  },
+  async ({ ops, stopOnError, target }) =>
+    guard(target, (t) => call("POST", "/batch", t, stopOnError === undefined ? { ops } : { ops, stopOnError })),
 );
 
 server.registerTool(

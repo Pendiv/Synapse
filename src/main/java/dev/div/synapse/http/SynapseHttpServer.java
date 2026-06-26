@@ -12,6 +12,7 @@ import dev.div.synapse.config.InstanceRegistry;
 import dev.div.synapse.config.SynapseConfig;
 import dev.div.synapse.core.ContextCollector;
 import dev.div.synapse.core.LogCapture;
+import dev.div.synapse.http.handlers.BatchHandler;
 import dev.div.synapse.http.handlers.ChatHandler;
 import dev.div.synapse.http.handlers.CommandHandler;
 import dev.div.synapse.http.handlers.GuiHandler;
@@ -24,16 +25,11 @@ import dev.div.synapse.http.handlers.WaitHandler;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -47,13 +43,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class SynapseHttpServer {
 
     public static final String AUTH_HEADER = "X-Synapse-Token";
-
-    /** Loopback host names accepted in the Host/Origin guard (anti DNS-rebinding). */
-    private static final Set<String> LOOPBACK_HOSTS = Set.of("127.0.0.1", "localhost", "::1", "[::1]");
-
-    /** Post-handler context/log collection gets a small budget so it can never
-     *  itself consume a full timeout (which would starve the small pool). */
-    private static final long CONTEXT_BUDGET_MS = 500L;
 
     static {
         // Bound slow/stalled REQUESTS (slowloris): if the request headers+body aren't fully received
@@ -132,6 +121,7 @@ public final class SynapseHttpServer {
         functional.add(new PlayerHandler());
         functional.add(new WaitHandler());
         functional.add(new ChatHandler());
+        functional.add(new BatchHandler());
         if (SynapseConfig.SCREENSHOT_ENABLED.get()) {
             functional.add(new ScreenshotHandler());
         }
@@ -330,15 +320,14 @@ public final class SynapseHttpServer {
 
     /**
      * Context for the envelope. Rejected responses (unauthorized / forbidden) get an empty
-     * object — this both avoids leaking game state and avoids scheduling main-thread work for
-     * a caller we already turned away. Otherwise collected with a small budget.
+     * object — this both avoids leaking game state and avoids work for a caller we already
+     * turned away. Otherwise it's a per-tick snapshot (no main-thread hop).
      */
     private static JsonObject contextFor(SynapseError errorCode) {
         if (withheld(errorCode)) {
             return new JsonObject();
         }
-        long budget = Math.min(SynapseConfig.TIMEOUT_MS.get(), CONTEXT_BUDGET_MS);
-        return ContextCollector.collectSafe(budget);
+        return ContextCollector.snapshot();
     }
 
     private static boolean withheld(SynapseError errorCode) {
@@ -370,24 +359,21 @@ public final class SynapseHttpServer {
         int port = port();
 
         String host = h.getFirst("Host");
-        if (!hostAllowed(host, port)) {
+        if (!RequestGuards.hostAllowed(host, port)) {
             throw new SynapseException(SynapseError.FORBIDDEN,
                     "Host header '" + host + "' is not an allowed loopback host (blocks DNS-rebinding).")
                     .detail("hint", "Reach Synapse via http://127.0.0.1:" + port + " or http://localhost:" + port + ".");
         }
 
         String secSite = h.getFirst("Sec-Fetch-Site");
-        if (secSite != null) {
-            String s = secSite.trim().toLowerCase(Locale.ROOT);
-            if (s.equals("cross-site") || s.equals("same-site")) {
-                throw new SynapseException(SynapseError.FORBIDDEN,
-                        "Cross-origin browser request blocked (Sec-Fetch-Site: " + s + ").")
-                        .detail("hint", "Synapse is a local API for non-browser agents; web pages cannot drive it.");
-            }
+        if (RequestGuards.isBlockedSecFetchSite(secSite)) {
+            throw new SynapseException(SynapseError.FORBIDDEN,
+                    "Cross-origin browser request blocked (Sec-Fetch-Site: " + secSite + ").")
+                    .detail("hint", "Synapse is a local API for non-browser agents; web pages cannot drive it.");
         }
 
         String origin = h.getFirst("Origin");
-        if (origin != null && !origin.isEmpty() && !originAllowed(origin, port)) {
+        if (origin != null && !origin.isEmpty() && !RequestGuards.originAllowed(origin, port)) {
             throw new SynapseException(SynapseError.FORBIDDEN,
                     "Origin '" + origin + "' is not allowed.")
                     .detail("hint", "Only a non-browser local agent (no Origin) or a localhost origin is accepted.");
@@ -402,65 +388,13 @@ public final class SynapseHttpServer {
         }
     }
 
-    /** True if {@code host} (a Host/authority value) names a loopback host on the expected port. */
-    private static boolean hostAllowed(String host, int port) {
-        if (host == null || host.isEmpty()) {
-            return false;
-        }
-        String h = host.trim();
-        String name;
-        String portStr;
-        if (h.startsWith("[")) { // IPv6 literal, e.g. [::1]:25599
-            int close = h.indexOf(']');
-            if (close < 0) {
-                return false;
-            }
-            name = h.substring(0, close + 1);
-            String rest = h.substring(close + 1);
-            portStr = rest.startsWith(":") ? rest.substring(1) : "";
-        } else {
-            int colon = h.lastIndexOf(':');
-            if (colon >= 0) {
-                name = h.substring(0, colon);
-                portStr = h.substring(colon + 1);
-            } else {
-                name = h;
-                portStr = "";
-            }
-        }
-        if (portStr.isEmpty()) {
-            return false; // our port is non-default, so a valid Host always carries it
-        }
-        try {
-            if (Integer.parseInt(portStr) != port) {
-                return false;
-            }
-        } catch (NumberFormatException e) {
-            return false;
-        }
-        return LOOPBACK_HOSTS.contains(name.toLowerCase(Locale.ROOT));
-    }
-
-    /** True if {@code origin} is an http(s) localhost origin on the expected port. */
-    private static boolean originAllowed(String origin, int port) {
-        int sep = origin.indexOf("://");
-        if (sep < 0) {
-            return false;
-        }
-        String scheme = origin.substring(0, sep).toLowerCase(Locale.ROOT);
-        if (!scheme.equals("http") && !scheme.equals("https")) {
-            return false;
-        }
-        return hostAllowed(origin.substring(sep + 3), port);
-    }
-
     private static void requireAuth(HttpExchange exchange) throws SynapseException {
         String token = AuthToken.effectiveToken();
         if (token.isEmpty()) {
             return; // auth disabled (only if explicitly forced off on a loopback bind)
         }
         String provided = exchange.getRequestHeaders().getFirst(AUTH_HEADER);
-        if (provided == null || !constantTimeEquals(provided, token)) {
+        if (provided == null || !RequestGuards.constantTimeEquals(provided, token)) {
             throw new SynapseException(SynapseError.UNAUTHORIZED,
                     "Missing or invalid " + AUTH_HEADER + " header.")
                     .detail("header", AUTH_HEADER);
@@ -477,22 +411,6 @@ public final class SynapseHttpServer {
         throw new SynapseException(SynapseError.BAD_REQUEST,
                 "This endpoint requires HTTP " + String.join("/", methods) + " but got " + actual + ".")
                 .detail("expectedMethods", String.join(",", methods));
-    }
-
-    /**
-     * Constant-time, length-independent comparison: both inputs are SHA-256'd first so the
-     * compare runs over equal-length digests and cannot leak the secret's length via timing.
-     */
-    private static boolean constantTimeEquals(String a, String b) {
-        return MessageDigest.isEqual(sha256(a), sha256(b));
-    }
-
-    private static byte[] sha256(String s) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e); // guaranteed present on every JVM
-        }
     }
 
     private static ThreadFactory daemonFactory() {

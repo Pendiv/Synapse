@@ -22,6 +22,10 @@ public final class TickClock {
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
+        // Refresh the response context snapshot every tick (incl. menus/paused), so
+        // /state etc. need no extra main-thread hop just to fill 'context'.
+        ContextCollector.capture();
+
         // Count only ticks where the world is actually progressing, so /wait and
         // timed movement track game time (and time out at the pause menu).
         Minecraft mc = Minecraft.getInstance();

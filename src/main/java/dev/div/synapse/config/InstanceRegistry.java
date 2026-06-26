@@ -63,26 +63,32 @@ public final class InstanceRegistry {
     public static synchronized void register(String instanceId, int port, String baseUrl,
                                              String token, String mcVersion, long startedAt) {
         try {
-            update(arr -> {
-                String gd = gameDir();
-                removeIf(arr, o -> gd.equals(str(o, "gamedir")) || port == intval(o, "port"));
-                JsonObject o = new JsonObject();
-                o.addProperty("name", instanceName());
-                o.addProperty("instanceId", instanceId);
-                o.addProperty("gamedir", gd);
-                o.addProperty("pid", ProcessHandle.current().pid());
-                o.addProperty("port", port);
-                o.addProperty("baseUrl", baseUrl);
-                if (token != null && !token.isEmpty()) {
-                    o.addProperty("token", token);
-                }
-                o.addProperty("mcVersion", mcVersion);
-                o.addProperty("startedAt", startedAt);
-                arr.add(o);
-            });
+            String gd = gameDir();
+            JsonObject entry = new JsonObject();
+            entry.addProperty("name", instanceName());
+            entry.addProperty("instanceId", instanceId);
+            entry.addProperty("gamedir", gd);
+            entry.addProperty("pid", ProcessHandle.current().pid());
+            entry.addProperty("port", port);
+            entry.addProperty("baseUrl", baseUrl);
+            if (token != null && !token.isEmpty()) {
+                entry.addProperty("token", token);
+            }
+            entry.addProperty("mcVersion", mcVersion);
+            entry.addProperty("startedAt", startedAt);
+            update(arr -> upsert(arr, entry, gd, port));
         } catch (Throwable t) {
             Synapse.LOGGER.warn("[Synapse] Could not register instance in {}: {}", file(), t.toString());
         }
+    }
+
+    /**
+     * Pure upsert: evict any entry that shares {@code gamedir} or {@code port} (a port belongs
+     * to exactly one live process), then append {@code entry}. Package-visible for unit tests.
+     */
+    static void upsert(JsonArray arr, JsonObject entry, String gamedir, int port) {
+        removeIf(arr, o -> gamedir.equals(str(o, "gamedir")) || port == intval(o, "port"));
+        arr.add(entry);
     }
 
     /** Removes this instance's entry. Best-effort (a hard kill skips this — consumers handle staleness). */

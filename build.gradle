@@ -133,10 +133,23 @@ dependencies {
     // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Synapse intentionally has no third-party dependencies — see §1 of the spec.
+    // Synapse intentionally has no third-party *runtime* dependencies — see §1 of the spec.
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+
+    // Test-only (JUnit 5). Not shipped in the mod jar; the runtime stays dependency-free.
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Unit tests cover the pure logic (request guards, registry upsert, JSON coercion,
+// main-thread timeout/isDone). They must not touch the Minecraft runtime.
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

@@ -63,13 +63,33 @@ public final class AgentDoc {
         return docFile().toAbsolutePath().toString();
     }
 
-    /** The paste-ready agent prompt, with this machine's base URL and token substituted. */
+    /**
+     * The paste-ready agent prompt, with this machine's base URL substituted. The auth
+     * token VALUE is never embedded (this text also lands in the on-disk AGENT.md, which
+     * may be synced or shipped with a modpack) — the prompt points at the token file
+     * instead, which the bundled MCP server reads automatically.
+     */
     public static String agentPrompt() {
         return PROMPT
                 .replace("__BASE__", baseUrl())
                 .replace("__AUTHHINT__", authEnabled()
-                        ? "Authenticate EVERY request with header  X-Synapse-Token: " + authToken()
+                        ? "Authenticate every request with the X-Synapse-Token header (token in "
+                                + tokenHint() + "; the bundled MCP server reads it automatically)."
                         : "No auth token is set.");
+    }
+
+    /** Where to find the token, WITHOUT printing its value — safe to persist/share. */
+    private static String tokenHint() {
+        return AuthToken.source() == AuthToken.Source.CONFIG
+                ? "your configured authToken in synapse-client.toml"
+                : "the file " + AuthToken.tokenFile().toAbsolutePath();
+    }
+
+    /** A shell expression that yields the token by reading the file (no literal value). */
+    private static String curlTokenExpr() {
+        return AuthToken.source() == AuthToken.Source.CONFIG
+                ? "\"<paste your synapse-client.toml authToken>\""  // user-managed; edit before running
+                : "$(cat \"" + AuthToken.tokenFile().toAbsolutePath() + "\")";
     }
 
     /** Shell snippet to attach the auth header in the curl examples (empty when auth is off). */
@@ -86,9 +106,9 @@ public final class AgentDoc {
                     + "machine's settings.\n\n"
                     + "- Base URL: `" + baseUrl() + "`\n"
                     + "- Auth: " + (authEnabled()
-                            ? "required — send header `X-Synapse-Token: " + authToken() + "`\n"
-                              + "  (this machine-local token is auto-generated; it is also stored in `"
-                              + AuthToken.tokenFile().toAbsolutePath() + "`)"
+                            ? "required — send header `X-Synapse-Token`. The token lives in "
+                              + tokenHint() + " (machine-local; the bundled MCP server and `/synapse` read it). "
+                              + "This file deliberately does NOT print the token, so it is safe to sync or ship."
                             : "disabled (token empty; localhost only)") + "\n"
                     + "- Minecraft 1.20.1 (Forge), client-side only.\n\n"
                     + "## One-time setup (human)\n\n"
@@ -100,7 +120,7 @@ public final class AgentDoc {
                     + "----------------------------------------------------------------------\n\n"
                     + "## First moves (shell)\n\n"
                     + "```\n"
-                    + (authEnabled() ? "TOKEN=" + authToken() + "\n" : "")
+                    + (authEnabled() ? "TOKEN=" + curlTokenExpr() + "\n" : "")
                     + "curl -s " + curlAuth() + baseUrl() + "/manifest | jq\n"
                     + "curl -s " + curlAuth() + "\"" + baseUrl() + "/state?mode=summary\" | jq .data\n"
                     + "curl -s -X POST " + curlAuth() + baseUrl() + "/cmd -d \"give @s minecraft:diamond 64\" | jq .data\n"

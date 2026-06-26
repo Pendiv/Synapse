@@ -22,10 +22,10 @@ AI client ⇄ synapse-mcp (this) ⇄ HTTP ⇄ Synapse mod ⇄ Minecraft
 ## Tools
 
 `synapse_list`, `synapse_manifest`, `synapse_state`, `synapse_cmd`,
-`synapse_gui`, `synapse_player`, `synapse_wait`, `synapse_chat`,
-`synapse_screenshot` (returns the frame as an image). They are thin proxies onto
-the bridge's endpoints; the model should call `synapse_manifest` first to learn
-parameter shapes.
+`synapse_gui`, `synapse_player`, `synapse_wait`, `synapse_chat`, `synapse_batch`
+(several ops in one call), `synapse_screenshot` (returns the frame as an image).
+They are thin proxies onto the bridge's endpoints; the model should call
+`synapse_manifest` first to learn parameter shapes.
 
 ## Multiple instances
 

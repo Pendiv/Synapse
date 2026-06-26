@@ -79,8 +79,7 @@ public final class HttpUtil {
      * drive-by web page even before the local-origin guard.
      */
     public static JsonObject parseJsonBody(HttpExchange exchange) throws IOException, SynapseException {
-        String ct = exchange.getRequestHeaders().getFirst("Content-Type");
-        if (ct == null || !ct.trim().toLowerCase(Locale.ROOT).startsWith("application/json")) {
+        if (!isJsonContentType(exchange.getRequestHeaders().getFirst("Content-Type"))) {
             throw new SynapseException(SynapseError.BAD_REQUEST,
                     "This endpoint requires Content-Type: application/json.")
                     .detail("hint", "Send the body as JSON with header 'Content-Type: application/json'.");
@@ -98,6 +97,11 @@ public final class HttpUtil {
         } catch (com.google.gson.JsonSyntaxException e) {
             throw new SynapseException(SynapseError.BAD_REQUEST, "Malformed JSON body: " + e.getMessage());
         }
+    }
+
+    /** True if a Content-Type header denotes JSON (not a CORS-"simple" type). Pure; unit-tested. */
+    public static boolean isJsonContentType(String contentType) {
+        return contentType != null && contentType.trim().toLowerCase(Locale.ROOT).startsWith("application/json");
     }
 
     public static String str(JsonObject o, String key, String def) {

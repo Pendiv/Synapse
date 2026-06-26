@@ -59,6 +59,7 @@ can drive it.
 | `POST /player` | look / move / use / attack / selectHotbar. |
 | `GET /wait?ticks=N` | Block until N in-world ticks pass (synchronisation). |
 | `GET /chat` / `POST /chat` | Read recent chat / send chat or a command. |
+| `POST /batch` | Run several ops in one request (cmd/state/player/gui/chat/wait), in order. |
 | `GET /screenshot` | PNG of the frame (visual checks only). |
 
 Every response uses one envelope: `{ ok, endpoint, data, error, logs, context, ts }`.
@@ -96,9 +97,9 @@ was reused is detected rather than silently driven.
 
 ## Configuration & security
 
-`synapse-client.toml` (in the config dir): `port`, `bindAddress`, `authToken`,
-`timeoutMs`, `maxBodyBytes`, `stateRadius`, `logBufferSize`, `captureAllModLogs`,
-`screenshotEnabled`.
+`synapse-client.toml` (in the config dir): `port`, `autoPort`, `bindAddress`,
+`authToken`, `timeoutMs`, `maxBodyBytes`, `batchBudgetMs`, `stateRadius`,
+`logBufferSize`, `captureAllModLogs`, `screenshotEnabled`.
 
 The bridge runs *inside your game client*, and `/cmd` executes Minecraft
 commands at permission level 4. Treat the port as a control surface and keep it
